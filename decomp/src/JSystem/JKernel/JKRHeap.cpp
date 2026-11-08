@@ -303,6 +303,9 @@ JKRErrorHandler JKRHeap::setErrorHandler(JKRErrorHandler errorHandler) {
 #include "port/heap_routing.h"
 extern "C" void port_irq_poll_at(void* site);
 #include <stdlib.h>
+#if defined(_WIN32)
+#include <new>  // (std::align_val_t)
+#endif
 
 // (PETARI_NEWPOLL=0 leaves the safe point out, for tests)
 #include "port/hot_knob.h"
@@ -434,6 +437,21 @@ void operator delete[](void* pData, int) noexcept {
 void operator delete[](void* pData, JKRHeap*, int) noexcept {
     gameFree(pData);
 }
+
+#if defined(_WIN32)
+// (Windows: the C++17 over-aligned forms must reach the game heap too. libc++ is linked statically and its
+// own versions use _aligned_malloc / _aligned_free, which cannot free game or host-heap blocks.)
+void* operator new(size_t size, std::align_val_t align) {
+    return gameAlloc(size, static_cast<int>(align), nullptr, __builtin_return_address(0));
+}
+void* operator new[](size_t size, std::align_val_t align) {
+    return gameAlloc(size, static_cast<int>(align), nullptr, __builtin_return_address(0));
+}
+void operator delete(void* pData, std::align_val_t) noexcept { gameFree(pData); }
+void operator delete[](void* pData, std::align_val_t) noexcept { gameFree(pData); }
+void operator delete(void* pData, size_t, std::align_val_t) noexcept { gameFree(pData); }
+void operator delete[](void* pData, size_t, std::align_val_t) noexcept { gameFree(pData); }
+#endif
 #else
 void* operator new(u32 size) {
     return JKRHeap::alloc(size, 4, nullptr);

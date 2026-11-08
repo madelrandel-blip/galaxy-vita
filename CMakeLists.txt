@@ -51,9 +51,10 @@ set(PORT_DEFS TARGET_PC=1 NDEBUG=1 VERSION=0)
 if(WIN32)
   add_compile_options("SHELL:-include ${CMAKE_SOURCE_DIR}/platform/windows/win_compat.h")
   add_compile_definitions(_USE_MATH_DEFINES)
-  # The game's operator new (JKRHeap) gives 4-byte alignment, as on the Wii. x86-64 clang otherwise assumes
-  # 16 and zeroes fresh objects with aligned SSE stores (movaps), which fault on JKRHeap blocks.
-  add_compile_options(-fnew-alignment=4)
+  # The game's operator new (JKRHeap) does not give 16-byte alignment. x86-64 clang otherwise assumes 16 and
+  # zeroes fresh objects with aligned SSE stores (movaps), which fault on JKRHeap blocks. 8, not 4: types with
+  # pointers keep the plain operator new (the over-aligned forms are routed to the game heap too, JKRHeap.cpp).
+  add_compile_options(-fnew-alignment=8)
 endif()
 
 # Paths in the binaries (__FILE__, debug info) relative to the repository

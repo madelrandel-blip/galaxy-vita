@@ -1795,6 +1795,36 @@ extern "C" void port_host_alloc_failed(size_t size, int align) {
     abort();
 }
 
+#if defined(_WIN32)
+// Over-aligned host blocks (rare: GX FIFO staging, a few aligned `new`s): a fixed table, no allocation of its own.
+static std::atomic_flag sWinAlignedLock = ATOMIC_FLAG_INIT;
+static void* sWinAligned[4096];
+static unsigned sWinAlignedCount;
+static std::atomic<unsigned> sWinAlignedLive{0};
+static void* winAlignedAlloc(size_t size, size_t align) {
+    void* p = _aligned_malloc(size, align);
+    if (!p) return nullptr;
+    while (sWinAlignedLock.test_and_set(std::memory_order_acquire)) {}
+    if (sWinAlignedCount == 4096) port_fatal("too many over-aligned host blocks");
+    sWinAligned[sWinAlignedCount++] = p;
+    sWinAlignedLive.store(sWinAlignedCount, std::memory_order_relaxed);
+    sWinAlignedLock.clear(std::memory_order_release);
+    return p;
+}
+static bool winAlignedFree(void* p) {
+    if (sWinAlignedLive.load(std::memory_order_relaxed) == 0) return false;
+    bool found = false;
+    while (sWinAlignedLock.test_and_set(std::memory_order_acquire)) {}
+    for (unsigned i = 0; i < sWinAlignedCount; ++i) {
+        if (sWinAligned[i] == p) { sWinAligned[i] = sWinAligned[--sWinAlignedCount]; found = true; break; }
+    }
+    sWinAlignedLive.store(sWinAlignedCount, std::memory_order_relaxed);
+    sWinAlignedLock.clear(std::memory_order_release);
+    if (found) _aligned_free(p);
+    return found;
+}
+#endif
+
 extern "C" void* port_host_alloc(size_t size, int align) {
     if (align < 16) {
         align = 16;
@@ -1806,14 +1836,12 @@ extern "C" void* port_host_alloc(size_t size, int align) {
     if (p && size >= 256u * 1024u) portHeapMark(size);
     return p;
 #elif defined(_WIN32)
-    // One fixed alignment, so _aligned_msize / _aligned_free never need to know the caller's.
+    // Plain malloc (16-byte aligned on x64), so any free() of this memory is right, as with glibc. The few
+    // over-aligned requests use _aligned_malloc and are remembered, so port_host_free can tell them apart.
     if (align & (align - 1)) return nullptr;
-    if (align < 64) align = 64;
-    if (align > 64) port_fatal("port_host_alloc: alignment %d above 64 on Windows", align);
-    void* p = _aligned_malloc(size ? size : 1, 64);
+    void* p = align <= 16 ? malloc(size ? size : 1) : winAlignedAlloc(size ? size : 1, (size_t)align);
     if (!p) return nullptr;
     if ((uintptr_t)p + size > UINT32_MAX) port_fatal("host heap above 4 GiB (%p): the game keeps 32-bit pointers", p);
-    sHostNewLive.fetch_add(_aligned_msize(p, 64, 0), std::memory_order_relaxed);
     if (size >= 256u * 1024u) portHeapMark(size);
     return p;
 #else
@@ -1829,7 +1857,7 @@ extern "C" void* port_host_alloc(size_t size, int align) {
 }
 extern "C" void port_host_free(void* p) {
 #if defined(_WIN32)
-    if (p) { sHostNewLive.fetch_sub(_aligned_msize(p, 64, 0), std::memory_order_relaxed); _aligned_free(p); }
+    if (p && !winAlignedFree(p)) free(p);
     return;
 #endif
     if (p) sHostNewLive.fetch_sub(malloc_usable_size(p), std::memory_order_relaxed);

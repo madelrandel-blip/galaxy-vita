@@ -142,7 +142,10 @@ elseif(WIN32)
   set_target_properties(game PROPERTIES OUTPUT_NAME galaxy)
   set(GALAXY_NATIVE_IMAGE_BASE "0x98000000" CACHE STRING "32-bit game image base")
   target_link_options(game PRIVATE -fuse-ld=lld -Wl,--image-base=${GALAXY_NATIVE_IMAGE_BASE} -Wl,--disable-dynamicbase
-                      -Wl,--disable-high-entropy-va -Wl,--stack,16777216)
+                      -Wl,--disable-high-entropy-va -Wl,--stack,16777216
+                      # libc++ inside the image: the game's global operator new/delete (JKRHeap.cpp) must
+                      # replace the C++ runtime's everywhere, as ELF interposition does on Linux.
+                      -static-libstdc++ -Wl,-Bstatic -lc++ -lc++abi -lunwind -lwinpthread -Wl,-Bdynamic)
   target_link_libraries(game PRIVATE SDL2::SDL2 GLESv2 EGL winmm pthread)
 else()
   # The game embeds 32-bit pointers. A non-PIE image in the Wii window keeps

@@ -39,6 +39,7 @@ SDL_GLContext g_context = nullptr;
 SDL_GameController* g_pad = nullptr;
 bool g_flipY = true;  // (ANGLE / D3D11: the EFB comes out bottom-up relative to the Vita host)
 float g_aspect = 16.0f / 9.0f;  // 0: stretch to the window
+bool g_showFps = true;          // FPS counter in the top-left corner (F3)
 // presented picture inside the window (drawable pixels), for the mouse pointer
 int g_viewX = 0, g_viewY = 0, g_viewW = 1, g_viewH = 1;
 
@@ -161,6 +162,7 @@ void Pump() {
             if (g_pad && !SDL_GameControllerGetAttached(g_pad)) { SDL_GameControllerClose(g_pad); g_pad = nullptr; OpenFirstPad(); }
             break;
         case SDL_KEYDOWN:
+            if (e.key.keysym.scancode == SDL_SCANCODE_F3) g_showFps = !g_showFps;
             if (e.key.keysym.scancode == SDL_SCANCODE_F11 ||
                 (e.key.keysym.scancode == SDL_SCANCODE_RETURN && (e.key.keysym.mod & KMOD_ALT)))
                 ToggleFullscreen();
@@ -179,6 +181,50 @@ void Pump() {
         }
     }
     UpdatePad();
+}
+
+// FPS counter (top-left corner, F3 toggles, PETARI_FPS=0 starts it hidden): pictures shown per second,
+// drawn as 3x5-cell digits with scissored clears, so it needs no shader, texture or font.
+int g_fpsShown = 0;
+unsigned g_fpsFrames = 0;
+Uint64 g_fpsSince = 0;
+
+void FillRect(int x, int y, int w, int h, int dh, float r, float g, float b) {
+    glScissor(x, dh - y - h, w, h);  // (y from the window's top)
+    glClearColor(r, g, b, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+}
+
+void DrawFps(int dw, int dh) {
+    ++g_fpsFrames;
+    const Uint64 now = SDL_GetPerformanceCounter(), freq = SDL_GetPerformanceFrequency();
+    if (!g_fpsSince) g_fpsSince = now;
+    if (now - g_fpsSince >= freq / 2) {
+        g_fpsShown = (int)std::lround(g_fpsFrames * (double)freq / (double)(now - g_fpsSince));
+        g_fpsFrames = 0;
+        g_fpsSince = now;
+    }
+    static const char* const kGlyphs[10] = {"111101101101111", "010110010010111", "111001111100111", "111001111001111",
+                                            "101101111001001", "111100111001111", "111100111101111", "111001001001001",
+                                            "111101111101111", "111101111001111"};
+    char text[8];
+    const int len = std::snprintf(text, sizeof(text), "%d", g_fpsShown < 0 ? 0 : (g_fpsShown > 999 ? 999 : g_fpsShown));
+    const int cell = dh >= 1000 ? 5 : (dh >= 600 ? 4 : 3);
+    const int pad = cell * 2, x0 = 8, y0 = 8;
+    const int boxW = pad * 2 + len * cell * 4 - cell, boxH = pad * 2 + cell * 5;
+    // colour: green at 55+, yellow at 30+, red below
+    const float r = g_fpsShown >= 55 ? 0.3f : 1.0f, g = g_fpsShown >= 30 ? 1.0f : 0.3f, b = 0.3f;
+    glEnable(GL_SCISSOR_TEST);
+    FillRect(x0, y0, boxW, boxH, dh, 0.0f, 0.0f, 0.0f);
+    for (int i = 0; i < len; ++i) {
+        const char* glyph = kGlyphs[text[i] - '0'];
+        for (int row = 0; row < 5; ++row)
+            for (int col = 0; col < 3; ++col)
+                if (glyph[row * 3 + col] == '1')
+                    FillRect(x0 + pad + i * cell * 4 + col * cell, y0 + pad + row * cell, cell, cell, dh, r, g, b);
+    }
+    glDisable(GL_SCISSOR_TEST);
+    (void)dw;
 }
 
 bool Present(unsigned efb, int x, int y, int w, int h) {
@@ -205,6 +251,7 @@ bool Present(unsigned efb, int x, int y, int w, int h) {
     // (window rows run bottom-up: the view's top edge is at dh - g_viewY)
     glBlitFramebuffer(x, sy0, x + w, sy1, g_viewX, dh - g_viewY, g_viewX + g_viewW, dh - g_viewY - g_viewH, GL_COLOR_BUFFER_BIT,
                       GL_LINEAR);
+    if (g_showFps) DrawFps(dw, dh);
     SDL_GL_SwapWindow(g_window);
     glBindFramebuffer(GL_FRAMEBUFFER, efb);
     Pump();
@@ -221,6 +268,7 @@ bool CreateContext() {
         return false;
     }
     if (const char* e = std::getenv("PETARI_FLIPY")) g_flipY = std::atoi(e) != 0;
+    if (const char* e = std::getenv("PETARI_FPS")) g_showFps = std::atoi(e) != 0;
     if (const char* e = std::getenv("PETARI_ASPECT")) {
         int a = 0, b = 0;
         if (std::sscanf(e, "%d:%d", &a, &b) == 2 && a > 0 && b > 0) g_aspect = (float)a / b;

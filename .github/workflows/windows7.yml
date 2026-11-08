@@ -1,0 +1,81 @@
+name: Windows 7 build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  windows7:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      # MINGW64: the classic msvcrt runtime (present on every Windows 7) instead of the Universal CRT
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-clang
+            mingw-w64-x86_64-lld
+            mingw-w64-x86_64-llvm
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-SDL2
+
+      # ANGLE r21358 (msvcrt, D3D11 + D3D9): the newer builds wait with WaitOnAddress, a Windows 8 function
+      - name: ANGLE for Windows 7
+        run: pacman -U --noconfirm https://repo.msys2.org/mingw/mingw64/mingw-w64-x86_64-angleproject-2.1.r21358.2e285bb5-9-any.pkg.tar.zst
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DGALAXY_WIN7=ON
+
+      - name: Build
+        run: cmake --build build -- -k 0 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
+
+      - name: Error summary
+        if: failure()
+        run: grep -E "error:|undefined symbol|FAILED:" build.log | sort | uniq -c | sort -rn | head -300 || true
+
+      - name: Package
+        run: |
+          d=dist/SMG-PC-win7
+          mkdir -p $d
+          cp build/galaxy.exe build/galaxy.map $d/
+          ldd build/galaxy.exe | awk '/mingw64/ {print $3}' | xargs -r -I{} cp {} $d/
+          # ANGLE is loaded by SDL at run time; its own runtime DLLs with it
+          for f in libEGL.dll libGLESv2.dll libstdc++-6.dll libgcc_s_seh-1.dll libwinpthread-1.dll zlib1.dll SDL2.dll; do cp /mingw64/bin/$f $d/; done
+          cp platform/windows/README-PC.txt $d/
+          ls -la $d
+
+      # ANGLE compiles its shaders with d3dcompiler_47.dll, which Windows 7 lacks: the SDK's redistributable copy
+      - name: d3dcompiler_47 (redistributable)
+        shell: pwsh
+        run: |
+          $f = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Redist" -Recurse -Filter d3dcompiler_47.dll -ErrorAction SilentlyContinue |
+               Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName | Select-Object -Last 1
+          if (-not $f) { throw "d3dcompiler_47.dll (x64 redist) not found" }
+          $f.FullName
+          Copy-Item $f.FullName dist/SMG-PC-win7/
+
+      - name: Check Windows 7 compatibility
+        run: |
+          mkdir -p chk; for f in dist/SMG-PC-win7/*; do case "$f" in *d3dcompiler_47.dll) ;; *) cp "$f" chk/;; esac; done
+          sh platform/windows/check_win7.sh chk
+          echo "--- d3dcompiler_47.dll imports (info)"; llvm-objdump -p dist/SMG-PC-win7/d3dcompiler_47.dll | sed -n 's/^ *DLL Name: //p'
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: SMG-PC-win7-x64
+          path: dist
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log-win7
+          path: build.log

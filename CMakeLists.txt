@@ -55,6 +55,11 @@ if(WIN32)
   # zeroes fresh objects with aligned SSE stores (movaps), which fault on JKRHeap blocks. 8, not 4: types with
   # pointers keep the plain operator new (the over-aligned forms are routed to the game heap too, JKRHeap.cpp).
   add_compile_options(-fnew-alignment=8)
+  # Windows 7 build (MSYS2 MINGW64: msvcrt, libstdc++): Windows 7 API level everywhere, game and renderer.
+  option(GALAXY_WIN7 "Windows 7 build: msvcrt + libstdc++, no Windows 8 APIs" OFF)
+  if(GALAXY_WIN7)
+    add_compile_definitions(_WIN32_WINNT=0x0601 WINVER=0x0601)
+  endif()
 endif()
 
 # Paths in the binaries (__FILE__, debug info) relative to the repository
@@ -138,7 +143,7 @@ elseif(WIN32)
   # inside the Wii window (no ASLR, no high-entropy VA), so code, data, thread stacks and the C heap
   # all stay below 4 GiB, and MEM1/MEM2 are fixed views (os_mem.cpp).
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(FATAL_ERROR "The Windows build is 64-bit only (MSYS2 CLANG64)")
+    message(FATAL_ERROR "The Windows build is 64-bit only (MSYS2 CLANG64 or MINGW64)")
   endif()
   list(FILTER PLATFORM_SRCS EXCLUDE REGEX "/xr/xr_app\\.cpp$")  # (as Linux: the VR glue the game links against stays)
   find_package(SDL2 REQUIRED)
@@ -147,10 +152,15 @@ elseif(WIN32)
   set(GALAXY_NATIVE_IMAGE_BASE "0x98000000" CACHE STRING "32-bit game image base")
   target_link_options(game PRIVATE -fuse-ld=lld -Wl,--image-base=${GALAXY_NATIVE_IMAGE_BASE} -Wl,--disable-dynamicbase
                       -Wl,--disable-high-entropy-va -Wl,--stack,16777216
-                      # libc++ inside the image: the game's global operator new/delete (JKRHeap.cpp) must
-                      # replace the C++ runtime's everywhere, as ELF interposition does on Linux.
-                      -static-libstdc++ -Wl,-Bstatic -lc++ -lc++abi -lunwind -lwinpthread -Wl,-Bdynamic
                       -Wl,-Map=${CMAKE_BINARY_DIR}/galaxy.map)  # (crash addresses -> functions)
+  # The C++ runtime goes inside the image: the game's global operator new/delete (JKRHeap.cpp) must
+  # replace the runtime's everywhere, as ELF interposition does on Linux.
+  #  CLANG64 (Windows 10/11, UCRT): libc++.  MINGW64 with GALAXY_WIN7=ON (Windows 7, msvcrt): libstdc++.
+  if(GALAXY_WIN7)
+    target_link_options(game PRIVATE -static-libstdc++ -static-libgcc -Wl,-Bstatic -lstdc++ -lwinpthread -Wl,-Bdynamic)
+  else()
+    target_link_options(game PRIVATE -static-libstdc++ -Wl,-Bstatic -lc++ -lc++abi -lunwind -lwinpthread -Wl,-Bdynamic)
+  endif()
   target_link_libraries(game PRIVATE SDL2::SDL2 GLESv2 EGL winmm pthread)
 else()
   # The game embeds 32-bit pointers. A non-PIE image in the Wii window keeps

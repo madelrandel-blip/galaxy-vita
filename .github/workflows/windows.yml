@@ -39,7 +39,7 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist/galaxy-pc
-          cp build/galaxy.exe dist/galaxy-pc/
+          cp build/galaxy.exe build/galaxy.map dist/galaxy-pc/
           ldd build/galaxy.exe | awk '/clang64/ {print $3}' | xargs -r -I{} cp {} dist/galaxy-pc/
           # ANGLE is loaded by SDL at run time, not linked: copy it explicitly
           cp /clang64/bin/libEGL.dll /clang64/bin/libGLESv2.dll dist/galaxy-pc/ 2>/dev/null || true

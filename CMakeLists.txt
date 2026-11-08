@@ -145,7 +145,8 @@ elseif(WIN32)
                       -Wl,--disable-high-entropy-va -Wl,--stack,16777216
                       # libc++ inside the image: the game's global operator new/delete (JKRHeap.cpp) must
                       # replace the C++ runtime's everywhere, as ELF interposition does on Linux.
-                      -static-libstdc++ -Wl,-Bstatic -lc++ -lc++abi -lunwind -lwinpthread -Wl,-Bdynamic)
+                      -static-libstdc++ -Wl,-Bstatic -lc++ -lc++abi -lunwind -lwinpthread -Wl,-Bdynamic
+                      -Wl,-Map=${CMAKE_BINARY_DIR}/galaxy.map)  # (crash addresses -> functions)
   target_link_libraries(game PRIVATE SDL2::SDL2 GLESv2 EGL winmm pthread)
 else()
   # The game embeds 32-bit pointers. A non-PIE image in the Wii window keeps

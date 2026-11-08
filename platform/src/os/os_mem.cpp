@@ -23,6 +23,9 @@ static uint32_t harnessMem2Size() {
 
 #if defined(__vita__)
 #include "memory.h"
+#elif defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #else
 #include <errno.h>
 #include <link.h>
@@ -124,7 +127,37 @@ const Region* physicalRegion(uint32_t address) {
     return nullptr;
 }
 
-#if !defined(__vita__)
+#if defined(_WIN32)
+// Windows: the Wii windows are fixed views below 4 GiB. MEM1/MEM2 and their uncached aliases share one
+// pagefile-backed section each (CreateFileMapping), mapped twice, as memfd + mmap does on Linux.
+uintptr_t sWindowBase, sWindowEnd, sLowBase;
+bool sLowReserved;
+HANDLE makeShared(size_t size) {
+    HANDLE h = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, (DWORD)((uint64_t)size >> 32), (DWORD)size, nullptr);
+    if (!h) port_fatal("CreateFileMapping(%zu) failed: %lu", size, (unsigned long)GetLastError());
+    return h;
+}
+void* mapAt(uintptr_t address, size_t size, HANDLE section) {
+    void* p = section ? MapViewOfFileEx(section, FILE_MAP_ALL_ACCESS, 0, 0, size, (void*)address)
+                      : VirtualAlloc((void*)address, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if (!p) port_fatal("fixed mapping at %08llx (+%zx) failed: %lu", (unsigned long long)address, size, (unsigned long)GetLastError());
+    if ((uintptr_t)p != address) port_fatal("mapping landed outside its requested 32-bit range");
+    return p;
+}
+void registerImage() {
+    const uintptr_t base = (uintptr_t)GetModuleHandleW(nullptr);
+    const auto* dos = (const IMAGE_DOS_HEADER*)base;
+    const auto* nt = (const IMAGE_NT_HEADERS*)(base + dos->e_lfanew);
+    if (nt->OptionalHeader.SizeOfImage > PORT_LIB_SIZE) port_fatal("native image exceeds logical image window");
+    if (base + nt->OptionalHeader.SizeOfImage > UINT32_MAX) port_fatal("native image above 4 GiB: link with a fixed low image base");
+    const IMAGE_SECTION_HEADER* sec = IMAGE_FIRST_SECTION(nt);
+    for (unsigned i = 0; i < nt->FileHeader.NumberOfSections; ++i) {
+        const uint32_t size = sec[i].Misc.VirtualSize;
+        if (!size) continue;
+        addRegion(base + sec[i].VirtualAddress, 0, 0x18000000u + sec[i].VirtualAddress, size, Image);
+    }
+}
+#elif !defined(__vita__)
 uintptr_t sWindowBase, sWindowEnd, sLowBase;
 bool sLowReserved;  // the whole low pool's address range is ours (reserved at start-up)
 int makeSharedFd(const char* name, size_t size) {
@@ -221,6 +254,16 @@ extern "C" int port_mem_init(void) {
     sMem1 = allocateVita("galaxy-mem1", PORT_MEM1_SIZE);
     sMem2 = allocateVita("galaxy-mem2", PORT_MEM2_SIZE);
     scratch = allocateVita("galaxy-lc", 0x4000);
+#elif defined(_WIN32)
+    sMem1 = PORT_MEM1_BASE; sMem2 = PORT_MEM2_BASE; sLowBase = PORT_LOWPOOL_BASE; scratch = PORT_LOCKED_CACHE;
+    alias1 = PORT_MEM1_UNCACHED; alias2 = PORT_MEM2_UNCACHED;
+    {
+        HANDLE h = makeShared(PORT_MEM1_SIZE);
+        mapAt(sMem1, PORT_MEM1_SIZE, h); mapAt(alias1, PORT_MEM1_SIZE, h); CloseHandle(h);
+        h = makeShared(PORT_MEM2_SIZE);
+        mapAt(sMem2, PORT_MEM2_SIZE, h); mapAt(alias2, PORT_MEM2_SIZE, h); CloseHandle(h);
+    }
+    mapAt(scratch, 0x4000, nullptr);
 #else
     const char* mode = getenv("PETARI_NATIVE_ADDRESSES");
     const bool rebased = mode && strcmp(mode, "0") != 0;
@@ -268,6 +311,8 @@ extern "C" int port_mem_init(void) {
     }
     uint32_t user, cdram, phycont;
     if (!port_vita_memory_free_sizes(&user, &cdram, &phycont)) PORT_LOG("mem: Vita free user %u CDRAM %u physical %u", user, cdram, phycont);
+#elif defined(_WIN32)
+    registerImage();
 #else
     bool foundImage = false;
     dl_iterate_phdr(registerImage, &foundImage);
@@ -301,7 +346,11 @@ extern "C" void* port_low_alloc(size_t size) {
 #if defined(__vita__)
     base = allocateVita("galaxy-low", (uint32_t)size);
 #else
+#if defined(_WIN32)
+    base = (uintptr_t)mapAt(sLowBase + sLowOffset, size, nullptr);
+#else
     base = (uintptr_t)mapAt(sLowBase + sLowOffset, size, -1);
+#endif
 #endif
     addRegion(base, 0, 0x20000000u + (uint32_t)sLowOffset, (uint32_t)size, LowPool);
     sLowOffset += size + page;

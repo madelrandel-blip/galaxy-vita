@@ -63,4 +63,6 @@ bool CreateContext() {
     return true;
 }
 
+void Idle() {}
+
 } // namespace vgx::host

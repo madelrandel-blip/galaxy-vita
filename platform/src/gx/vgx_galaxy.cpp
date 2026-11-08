@@ -620,7 +620,12 @@ void RenderMain() {
             lk.lock();
         }
 #else
-        sCv.wait(lk, [] { return !sJobs.empty(); });
+        // (a time limit, so the host's window keeps answering while the game loads)
+        while (!sCv.wait_for(lk, std::chrono::milliseconds(16), [] { return !sJobs.empty(); })) {
+            lk.unlock();
+            vgx::host::Idle();
+            lk.lock();
+        }
 #endif
         vgx::CmdBuf* job = sJobs.front();
         const bool cap = sCapWanted;

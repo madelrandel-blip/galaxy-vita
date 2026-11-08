@@ -12,8 +12,10 @@
 
 #if !defined(__vita__)
 // Diagnostics-only (PETARI_STATS, see below); never compiled for the Vita.
+#if !defined(_WIN32)
 #include <sys/resource.h>
 #include <sys/syscall.h>
+#endif
 #include <unistd.h>
 
 #include <chrono>
@@ -578,7 +580,9 @@ struct StatsThread {
     }
 
     void run() {
+#if !defined(_WIN32)
         setpriority(PRIO_PROCESS, (id_t)syscall(SYS_gettid), 10);
+#endif
         std::unordered_set<ShaderUid, ShaderUidHash> allUids;
         std::unordered_set<uint64_t> allVertex, allTev;
         std::unordered_set<const TexImage*> allImages;

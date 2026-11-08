@@ -777,9 +777,10 @@ static void startHostThread(OSThread* t, HostThread* h) {
     size_t stackSize = h->stackSize ? h->stackSize : (2u << 20);
     pthread_attr_t attr;
     if (pthread_attr_init(&attr) != 0) port_fatal("pthread_attr_init failed");
-#if defined(__vita__)
+#if defined(__vita__) || defined(_WIN32)
     // VitaSDK creates its own kernel stack; supplying an address only duplicated
     // the allocation. Preserve the native stack size, not the unused copy.
+    // (Windows: winpthreads cannot take a caller's stack; the OS places it, below 4 GiB in this non-ASLR image.)
     if (pthread_attr_setstacksize(&attr, stackSize) != 0) port_fatal("pthread_attr_setstacksize failed");
 #else
     void* stack = port_low_alloc(stackSize);
@@ -1804,6 +1805,17 @@ extern "C" void* port_host_alloc(size_t size, int align) {
     if (p) sHostNewLive.fetch_add(malloc_usable_size(p), std::memory_order_relaxed);
     if (p && size >= 256u * 1024u) portHeapMark(size);
     return p;
+#elif defined(_WIN32)
+    // One fixed alignment, so _aligned_msize / _aligned_free never need to know the caller's.
+    if (align & (align - 1)) return nullptr;
+    if (align < 64) align = 64;
+    if (align > 64) port_fatal("port_host_alloc: alignment %d above 64 on Windows", align);
+    void* p = _aligned_malloc(size ? size : 1, 64);
+    if (!p) return nullptr;
+    if ((uintptr_t)p + size > UINT32_MAX) port_fatal("host heap above 4 GiB (%p): the game keeps 32-bit pointers", p);
+    sHostNewLive.fetch_add(_aligned_msize(p, 64, 0), std::memory_order_relaxed);
+    if (size >= 256u * 1024u) portHeapMark(size);
+    return p;
 #else
     void* p = nullptr;
     if (posix_memalign(&p, (size_t)align, size ? size : 1) != 0) {
@@ -1816,6 +1828,10 @@ extern "C" void* port_host_alloc(size_t size, int align) {
 #endif
 }
 extern "C" void port_host_free(void* p) {
+#if defined(_WIN32)
+    if (p) { sHostNewLive.fetch_sub(_aligned_msize(p, 64, 0), std::memory_order_relaxed); _aligned_free(p); }
+    return;
+#endif
     if (p) sHostNewLive.fetch_sub(malloc_usable_size(p), std::memory_order_relaxed);
 #if !defined(__vita__) && defined(__GLIBC__)
     if (p && siteTracking()) siteFree(p);
@@ -1826,7 +1842,7 @@ extern "C" void port_host_free(void* p) {
 // ---------------------------------------------------------------------------
 // Diagnostics: emulated thread states and native backtraces
 // ---------------------------------------------------------------------------
-#if !defined(__vita__)
+#if !defined(__vita__) && !defined(_WIN32)
 static std::atomic<int> sBtDone;
 static uintptr_t sBtPcs[40];
 static int sBtCount;
@@ -1847,7 +1863,9 @@ static void btSignal(int) {
 #endif
 
 extern "C" void port_debug_dump_threads(void) {
-#if !defined(__vita__)
+#if defined(_WIN32)
+    port_log("threads: Windows cross-thread native backtraces unavailable");
+#elif !defined(__vita__)
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = btSignal;
@@ -1865,7 +1883,7 @@ extern "C" void port_debug_dump_threads(void) {
         }
         port_log("thread %p prio %d/%d state %d suspend %d queue %p mutex %p%s", (void*)t, t->priority, t->base, t->state, t->suspend,
                  (void*)t->queue, (void*)t->mutex, t == sCpuOwner ? " [CPU]" : "");
-#if !defined(__vita__)
+#if !defined(__vita__) && !defined(_WIN32)
         HostThread& h = sHost[i];
         if (!h.hasPt) {
             continue;
@@ -2001,7 +2019,7 @@ extern "C" void port_os_boot(void (*entry)(void)) {
 
     pthread_attr_t attr;
     if (pthread_attr_init(&attr) != 0) port_fatal("pthread_attr_init failed");
-#if defined(__vita__)
+#if defined(__vita__) || defined(_WIN32)
     if (pthread_attr_setstacksize(&attr, kMainStack) != 0) port_fatal("main pthread_attr_setstacksize failed");
 #else
     if (pthread_attr_setstack(&attr, stack, kMainStack) != 0) port_fatal("main pthread_attr_setstack failed");

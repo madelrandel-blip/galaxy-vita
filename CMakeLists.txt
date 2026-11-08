@@ -46,6 +46,13 @@ set(DECOMP_INCLUDES
 
 set(PORT_DEFS TARGET_PC=1 NDEBUG=1 VERSION=0)
 
+# Windows (MSYS2 CLANG64: clang, lld, libc++, winpthreads, SDL2, ANGLE): the POSIX shims go
+# into every translation unit, game, platform and vgx alike (platform/windows/win_compat.h).
+if(WIN32)
+  add_compile_options("SHELL:-include ${CMAKE_SOURCE_DIR}/platform/windows/win_compat.h")
+  add_compile_definitions(_USE_MATH_DEFINES)
+endif()
+
 # Paths in the binaries (__FILE__, debug info) relative to the repository
 # and the NDK, not the machine that built them.
 add_compile_options(-ffile-prefix-map=${CMAKE_SOURCE_DIR}/= -ffile-prefix-map=${CMAKE_SOURCE_DIR}=.)
@@ -99,7 +106,7 @@ set(PORT_COMMON_FLAGS
 )
 set(PORT_CXX_FLAGS -fno-exceptions -fno-rtti)
 set(PORT_C_FLAGS)
-if(NOT ANDROID AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(NOT ANDROID AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR WIN32))
   list(APPEND PORT_C_FLAGS "SHELL:-include ${CMAKE_SOURCE_DIR}/platform/desktop/c_compat.h")
 endif()
 
@@ -122,6 +129,21 @@ list(FILTER PLATFORM_SRCS EXCLUDE REGEX "/gx/gx_ram_texture\\.cpp$")
 
 if(ANDROID)
   add_library(game SHARED $<TARGET_OBJECTS:decomp> ${PLATFORM_SRCS})
+elseif(WIN32)
+  # Windowed Windows build. The game embeds 32-bit pointers: the image is linked at a fixed base
+  # inside the Wii window (no ASLR, no high-entropy VA), so code, data, thread stacks and the C heap
+  # all stay below 4 GiB, and MEM1/MEM2 are fixed views (os_mem.cpp).
+  if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    message(FATAL_ERROR "The Windows build is 64-bit only (MSYS2 CLANG64)")
+  endif()
+  list(FILTER PLATFORM_SRCS EXCLUDE REGEX "/xr/")
+  find_package(SDL2 REQUIRED)
+  add_executable(game $<TARGET_OBJECTS:decomp> ${PLATFORM_SRCS} platform/windows/main.cpp platform/windows/win_compat.c)
+  set_target_properties(game PROPERTIES OUTPUT_NAME galaxy)
+  set(GALAXY_NATIVE_IMAGE_BASE "0x98000000" CACHE STRING "32-bit game image base")
+  target_link_options(game PRIVATE -fuse-ld=lld -Wl,--image-base=${GALAXY_NATIVE_IMAGE_BASE} -Wl,--disable-dynamicbase
+                      -Wl,--disable-high-entropy-va -Wl,--stack,16777216)
+  target_link_libraries(game PRIVATE SDL2::SDL2 GLESv2 EGL winmm pthread)
 else()
   # The game embeds 32-bit pointers. A non-PIE image in the Wii window keeps
   # both native code/data and emulated arenas representable without dlopen.
@@ -150,16 +172,28 @@ option(PORT_GX_VGX "Build the vgx GX renderer" ON)
 if(PORT_GX_VGX AND NOT ANDROID)
   file(GLOB VGX_SRCS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/platform/vgx/src/*.cpp)
   list(FILTER VGX_SRCS EXCLUDE REGEX "/vgx_backend_null\\.cpp$")
-  add_library(vgx STATIC ${VGX_SRCS} platform/vgx/host/vgx_host_egl.cpp)
+  if(WIN32)
+    add_library(vgx STATIC ${VGX_SRCS} platform/vgx/host/vgx_host_sdl.cpp)
+    target_include_directories(vgx PRIVATE platform/include)
+    target_link_libraries(vgx PRIVATE SDL2::SDL2)
+  else()
+    add_library(vgx STATIC ${VGX_SRCS} platform/vgx/host/vgx_host_egl.cpp)
+  endif()
   target_include_directories(vgx PRIVATE platform/vgx/src platform/vgx/third_party)
   target_compile_features(vgx PRIVATE cxx_std_20)
-  target_compile_options(vgx PRIVATE -O2 -fno-exceptions -fno-rtti -mcmodel=large -fno-pie -stdlib=libc++ -Wall -Wno-unused-function)
+  if(WIN32)
+    target_compile_options(vgx PRIVATE -O2 -fno-exceptions -fno-rtti -Wall -Wno-unused-function)
+  else()
+    target_compile_options(vgx PRIVATE -O2 -fno-exceptions -fno-rtti -mcmodel=large -fno-pie -stdlib=libc++ -Wall -Wno-unused-function)
+  endif()
   target_compile_definitions(game PRIVATE PORT_GX_VGX=1)
   target_include_directories(game PRIVATE platform/vgx/src)
   target_link_libraries(game PRIVATE vgx)
 endif()
 target_compile_options(game PRIVATE ${PORT_COMMON_FLAGS} $<$<COMPILE_LANGUAGE:CXX>:${PORT_CXX_FLAGS}> $<$<COMPILE_LANGUAGE:C>:${PORT_C_FLAGS}>)
-target_link_options(game PRIVATE -Wl,--no-undefined -Wl,--error-limit=0)
+if(NOT WIN32)
+  target_link_options(game PRIVATE -Wl,--no-undefined -Wl,--error-limit=0)
+endif()
 if(ANDROID)
   # -Bsymbolic: game code must bind to the port's operator new/delete, not the
   # system C++ runtime's.

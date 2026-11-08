@@ -630,6 +630,9 @@ namespace host {
 // (the render thread). vgx_host_egl.cpp for the GL back end; the null back
 // end has nothing to create.
 bool CreateContext();
+// Called on the render thread while it waits for a frame (desktop hosts): a windowed
+// host keeps its window responsive and its input fresh during long loads.
+void Idle();
 }
 
 } // namespace vgx

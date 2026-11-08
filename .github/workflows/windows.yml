@@ -1,0 +1,59 @@
+name: Windows build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          install: >-
+            mingw-w64-clang-x86_64-toolchain
+            mingw-w64-clang-x86_64-cmake
+            mingw-w64-clang-x86_64-ninja
+            mingw-w64-clang-x86_64-SDL2
+            mingw-w64-clang-x86_64-angleproject
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+
+      - name: Build
+        # (-k 0: keep going, so one run lists every file that still fails)
+        run: cmake --build build -- -k 0 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
+
+      - name: Error summary
+        if: failure()
+        run: grep -E "error:|undefined symbol|FAILED:" build.log | sort | uniq -c | sort -rn | head -300 || true
+
+      - name: Package
+        run: |
+          mkdir -p dist/galaxy-pc
+          cp build/galaxy.exe dist/galaxy-pc/
+          ldd build/galaxy.exe | awk '/clang64/ {print $3}' | xargs -r -I{} cp {} dist/galaxy-pc/
+          # ANGLE is loaded by SDL at run time, not linked: copy it explicitly
+          cp /clang64/bin/libEGL.dll /clang64/bin/libGLESv2.dll dist/galaxy-pc/ 2>/dev/null || true
+          cp platform/windows/README-PC.txt dist/galaxy-pc/
+          ls -la dist/galaxy-pc
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: galaxy-pc-windows-x64
+          path: dist/galaxy-pc
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-log
+          path: build.log

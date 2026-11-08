@@ -11,7 +11,7 @@ The game data must be the disc *converted* for the port (not just extracted):
     a. Dolphin's DolphinTool:  DolphinTool extract -i "Super Mario Galaxy.rvz" -o raw -g
     b. python tools/cook/cook.py raw/DATA game --with-movies
     c. copy raw/DATA/sys/main.dol into game/sys/
-  You end up with game\sys\ and gameiles\ next to galaxy.exe.
+  You end up with game\sys\ and game\files\ next to galaxy.exe.
 
 Run galaxy.exe. Saves, the shader cache and game.log go to the "saves" folder next to it.
 Other folders: galaxy.exe <game-folder> [save-folder]

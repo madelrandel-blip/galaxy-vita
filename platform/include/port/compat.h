@@ -13,10 +13,18 @@
 // wrappers) before the renames below, so the macros only affect game code.
 #include <stdio.h>
 #include <float.h>
-#if defined(__linux__) && !defined(__ANDROID__)
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(_WIN32)
 // Parse libc/libc++ declarations before the game's UTF-16 name remapping.
+// (Windows: libstdc++'s <cstdio> / <cwchar> #undef sprintf, wcslen, ... when a later include reaches them,
+// silently handing game code the C runtime's versions - "(null)" for a NULL %s, 32-bit wide strings. Read
+// once here, before the renames, their include guards keep them from undoing them.)
 #ifdef __cplusplus
 #include <cwchar>
+#if defined(_WIN32)
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#endif
 #else
 #include <wchar.h>
 #endif

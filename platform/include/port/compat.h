@@ -214,6 +214,26 @@ void port_fatal(const char* fmt, ...) __attribute__((format(printf, 1, 2), noret
 }
 #endif
 
+#if defined(_WIN32) && defined(__cplusplus)
+// (Windows / libstdc++: library headers read after the renames above name std::vsnprintf, std::wcslen, ...;
+// the renames turn those into std::port_*, so the port's functions are made visible in std as well.)
+namespace std {
+using ::port_vsnprintf;
+using ::port_snprintf;
+using ::port_vsprintf;
+using ::port_sprintf;
+using ::port_wcslen;
+using ::port_wcsncpy;
+using ::port_wcscpy;
+using ::port_wcscmp;
+using ::port_wcsncmp;
+using ::port_wcschr;
+using ::port_wcscat;
+using ::port_swprintf;
+using ::port_vswprintf;
+}  // namespace std
+#endif
+
 // CodeWarrior-only keywords / pragmas that may leak into headers.
 #ifndef _WIN32
 #define __declspec(x)

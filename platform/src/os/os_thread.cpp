@@ -1796,18 +1796,26 @@ extern "C" void port_host_alloc_failed(size_t size, int align) {
 }
 
 #if defined(_WIN32)
-// Over-aligned host blocks (rare: GX FIFO staging, a few aligned `new`s): a fixed table, no allocation of its own.
+// Over-aligned host blocks (_aligned_malloc, which plain free() cannot release): remembered in an open-addressing
+// hash set (linear probing, backward-shift deletion), so port_host_free can tell them from malloc blocks.
+// 2^21 slots (16 MiB, calloc'd once): kept under half full, far above what the game holds live at once.
 static std::atomic_flag sWinAlignedLock = ATOMIC_FLAG_INIT;
-static void* sWinAligned[4096];
-static unsigned sWinAlignedCount;
-static std::atomic<unsigned> sWinAlignedLive{0};
+static constexpr size_t kWinAlignedSlots = size_t(1) << 21;
+static uintptr_t* sWinAligned;
+static size_t sWinAlignedCount;
+static std::atomic<size_t> sWinAlignedLive{0};
+static inline size_t winAlignedHash(uintptr_t p) { return (size_t)((p >> 4) * 0x9E3779B97F4A7C15ull >> 43) & (kWinAlignedSlots - 1); }
 static void* winAlignedAlloc(size_t size, size_t align) {
     void* p = _aligned_malloc(size, align);
     if (!p) return nullptr;
     while (sWinAlignedLock.test_and_set(std::memory_order_acquire)) {}
-    if (sWinAlignedCount == 4096) port_fatal("too many over-aligned host blocks");
-    sWinAligned[sWinAlignedCount++] = p;
-    sWinAlignedLive.store(sWinAlignedCount, std::memory_order_relaxed);
+    if (!sWinAligned && !(sWinAligned = (uintptr_t*)calloc(kWinAlignedSlots, sizeof(uintptr_t))))
+        port_fatal("cannot allocate the over-aligned block table");
+    if (sWinAlignedCount >= kWinAlignedSlots / 2) port_fatal("too many over-aligned host blocks (%zu live)", sWinAlignedCount);
+    size_t i = winAlignedHash((uintptr_t)p);
+    while (sWinAligned[i]) i = (i + 1) & (kWinAlignedSlots - 1);
+    sWinAligned[i] = (uintptr_t)p;
+    sWinAlignedLive.store(++sWinAlignedCount, std::memory_order_relaxed);
     sWinAlignedLock.clear(std::memory_order_release);
     return p;
 }
@@ -1815,10 +1823,22 @@ static bool winAlignedFree(void* p) {
     if (sWinAlignedLive.load(std::memory_order_relaxed) == 0) return false;
     bool found = false;
     while (sWinAlignedLock.test_and_set(std::memory_order_acquire)) {}
-    for (unsigned i = 0; i < sWinAlignedCount; ++i) {
-        if (sWinAligned[i] == p) { sWinAligned[i] = sWinAligned[--sWinAlignedCount]; found = true; break; }
+    size_t i = winAlignedHash((uintptr_t)p);
+    while (sWinAligned[i] && sWinAligned[i] != (uintptr_t)p) i = (i + 1) & (kWinAlignedSlots - 1);
+    if (sWinAligned[i]) {
+        found = true;
+        sWinAligned[i] = 0;
+        // backward shift: close the gap so later probes of the same run still find their entries
+        size_t j = i;
+        for (;;) {
+            j = (j + 1) & (kWinAlignedSlots - 1);
+            if (!sWinAligned[j]) break;
+            const size_t home = winAlignedHash(sWinAligned[j]);
+            const bool movable = (j > i) ? (home <= i || home > j) : (home <= i && home > j);
+            if (movable) { sWinAligned[i] = sWinAligned[j]; sWinAligned[j] = 0; i = j; }
+        }
+        sWinAlignedLive.store(--sWinAlignedCount, std::memory_order_relaxed);
     }
-    sWinAlignedLive.store(sWinAlignedCount, std::memory_order_relaxed);
     sWinAlignedLock.clear(std::memory_order_release);
     if (found) _aligned_free(p);
     return found;

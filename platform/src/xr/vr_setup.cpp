@@ -127,7 +127,11 @@ void scanDir(const std::string& dir, int depth, bool skipAndroid, std::vector<Fo
     }
     std::vector<std::string> subs;
     while (dirent* e = readdir(d)) {
+#if defined(_WIN32)
+        if (e->d_name[0] == '.') continue;  // (no d_type on Windows: isDir() below decides)
+#else
         if (e->d_name[0] == '.' || (e->d_type != DT_DIR && e->d_type != DT_UNKNOWN && e->d_type != DT_LNK)) continue;
+#endif
         // Other apps' folders cannot be read (and the app's own is searched on its own).
         if (skipAndroid && strcmp(e->d_name, "Android") == 0) continue;
         subs.push_back(e->d_name);

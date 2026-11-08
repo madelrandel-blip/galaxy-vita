@@ -63,9 +63,37 @@ static LONG WINAPI crashed(EXCEPTION_POINTERS* info) {
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
+// First-chance handler for fatal exceptions, heap corruption included (which never reaches the
+// unhandled filter): writes the code and the call stack as galaxy.exe offsets (galaxy.map) to
+// stderr with no heap use.
+static LONG WINAPI fatalFirstChance(EXCEPTION_POINTERS* info) {
+    const DWORD code = info->ExceptionRecord->ExceptionCode;
+    if (code != 0xC0000374 && code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_ILLEGAL_INSTRUCTION &&
+        code != EXCEPTION_STACK_OVERFLOW && code != EXCEPTION_PRIV_INSTRUCTION && code != 0xC0000409)
+        return EXCEPTION_CONTINUE_SEARCH;
+    static volatile LONG once = 0;
+    if (InterlockedExchange(&once, 1)) return EXCEPTION_CONTINUE_SEARCH;
+    const uintptr_t base = (uintptr_t)GetModuleHandleA(nullptr);
+    char line[4096];
+    int n = snprintf(line, sizeof(line), "FATAL exception %08lx at %p (thread %lu)\n  stack:", (unsigned long)code,
+                     info->ExceptionRecord->ExceptionAddress, (unsigned long)GetCurrentThreadId());
+    void* frames[48];
+    const USHORT count = RtlCaptureStackBackTrace(0, 48, frames, nullptr);
+    for (USHORT i = 0; i < count && n < (int)sizeof(line) - 40; ++i) {
+        const uintptr_t pc = (uintptr_t)frames[i];
+        if (pc >= base && pc < base + 0x08000000) n += snprintf(line + n, sizeof(line) - n, " exe+%llx", (unsigned long long)(pc - base));
+        else n += snprintf(line + n, sizeof(line) - n, " %p", (void*)pc);
+    }
+    n += snprintf(line + n, sizeof(line) - n, "\n");
+    DWORD written;
+    WriteFile(GetStdHandle(STD_ERROR_HANDLE), line, (DWORD)n, &written, nullptr);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 int main(int argc, char** argv) {
     _set_fmode(_O_BINARY);  // (every file the port opens is binary)
     timeBeginPeriod(1);     // 1 ms sleeps: the emulated Wii clock and the frame pacing rely on them
+    AddVectoredExceptionHandler(1, fatalFirstChance);
     SetUnhandledExceptionFilter(crashed);
 
     const std::string here = exeDir();

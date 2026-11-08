@@ -8,6 +8,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <string>
 #include <vector>
 
 #include "gl_renderer.h"

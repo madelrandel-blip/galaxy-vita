@@ -33,6 +33,17 @@ int port_win_fsync(int fd);
 #ifndef O_CLOEXEC
 #define O_CLOEXEC 0
 #endif
+#ifndef O_NONBLOCK
+#define O_NONBLOCK 0
+#endif
+
+#include <malloc.h>
+#include <time.h>
+#define malloc_usable_size(p) _msize(p)
+static inline struct tm* port_win_localtime_r(const time_t* t, struct tm* out) { return localtime_s(out, t) ? 0 : out; }
+static inline struct tm* port_win_gmtime_r(const time_t* t, struct tm* out) { return gmtime_s(out, t) ? 0 : out; }
+#define localtime_r port_win_localtime_r
+#define gmtime_r port_win_gmtime_r
 
 // mkdir(path, mode): MSVCRT's mkdir takes no mode.
 #define mkdir(path, mode) port_win_mkdir((path), (mode))

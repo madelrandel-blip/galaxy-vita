@@ -80,7 +80,11 @@ static void initTimeBase() {
     time_t now = time(nullptr);
     struct tm lt;
     localtime_r(&now, &lt);
+#if defined(_WIN32)
+    int64_t localNow = (int64_t)_mkgmtime(&lt);  // (local wall time read as if it were UTC: no tm_gmtoff on Windows)
+#else
     int64_t localNow = (int64_t)now + lt.tm_gmtoff;
+#endif
 #endif
     const int64_t kEpoch2000 = 946684800;  // 2000-01-01 in Unix time
     sBootTicks = (localNow - kEpoch2000) * kTimerClock;

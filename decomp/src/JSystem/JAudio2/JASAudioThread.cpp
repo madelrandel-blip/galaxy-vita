@@ -15,6 +15,11 @@
 #include <revolution/dsp.h>
 #include <stdint.h>
 
+// (Windows/COFF: an out-of-line copy of this inline constructor would collide with Overwrite.cpp's
+// strong definition, which ELF linkers silently prefer; always inline it so none is emitted.)
+#if defined(_WIN32)
+__attribute__((always_inline))
+#endif
 inline JASAudioThread::JASAudioThread(int stackSize, int msgCount, u32 threadPriority)
     : JKRThread(JASDram, threadPriority, msgCount, stackSize), JASGlobalInstance< JASAudioThread >(true) {
     sbPauseFlag = false;

@@ -26,4 +26,4 @@ Controls
 Options (environment variables)
   PETARI_WINDOW=1920x1080   window size        PETARI_FULLSCREEN=1  start fullscreen
   PETARI_ASPECT=4:3         picture aspect (default 16:9; "fill" stretches)
-  PETARI_VSYNC=0            no vsync           PETARI_FLIPY=1       if the picture is upside down
+  PETARI_VSYNC=0            no vsync           PETARI_FLIPY=0       if the picture is upside down

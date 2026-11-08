@@ -37,7 +37,7 @@ namespace {
 SDL_Window* g_window = nullptr;
 SDL_GLContext g_context = nullptr;
 SDL_GameController* g_pad = nullptr;
-bool g_flipY = false;
+bool g_flipY = true;  // (ANGLE / D3D11: the EFB comes out bottom-up relative to the Vita host)
 float g_aspect = 16.0f / 9.0f;  // 0: stretch to the window
 // presented picture inside the window (drawable pixels), for the mouse pointer
 int g_viewX = 0, g_viewY = 0, g_viewW = 1, g_viewH = 1;
@@ -236,6 +236,13 @@ bool CreateContext() {
     SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);  // (the back end draws into its own framebuffer objects)
     int w = 1280, h = 720;
+    SDL_Rect usable;
+    if (SDL_GetDisplayUsableBounds(0, &usable) == 0 && (usable.w < w + 40 || usable.h < h + 80)) {
+        // (small screens: 16:9 at 80% of the usable desktop, so the title bar and the picture fit)
+        h = usable.h * 8 / 10;
+        w = h * 16 / 9;
+        if (w > usable.w * 9 / 10) { w = usable.w * 9 / 10; h = w * 9 / 16; }
+    }
     if (const char* e = std::getenv("PETARI_WINDOW")) std::sscanf(e, "%dx%d", &w, &h);
     g_window = SDL_CreateWindow("Super Mario Galaxy (PC)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h,
                                 SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);

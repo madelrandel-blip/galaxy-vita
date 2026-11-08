@@ -157,7 +157,9 @@ elseif(WIN32)
   # replace the runtime's everywhere, as ELF interposition does on Linux.
   #  CLANG64 (Windows 10/11, UCRT): libc++.  MINGW64 with GALAXY_WIN7=ON (Windows 7, msvcrt): libstdc++.
   if(GALAXY_WIN7)
-    target_link_options(game PRIVATE -static-libstdc++ -static-libgcc -Wl,-Bstatic -lstdc++ -lwinpthread -Wl,-Bdynamic)
+    # (no explicit -lstdc++ here: link options precede the objects, and an archive read that early hands lld
+    # libstdc++'s own operator new/delete before JKRHeap.cpp's; the driver adds it after the objects)
+    target_link_options(game PRIVATE -static-libstdc++ -static-libgcc)
   else()
     target_link_options(game PRIVATE -static-libstdc++ -Wl,-Bstatic -lc++ -lc++abi -lunwind -lwinpthread -Wl,-Bdynamic)
   endif()

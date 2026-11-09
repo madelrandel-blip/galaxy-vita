@@ -32,6 +32,9 @@ public:
     void exeConfirm();
     void exeGameDataSave();
     void exeLuigiLetter();
+#if defined(TARGET_PC) && defined(_WIN32)
+    void exePortSettings();  // (PC: the Settings button's screen, platform/windows/pc_menu.cpp)
+#endif
 
     /* 0x20 */ ButtonPaneController* _20;
     /* 0x24 */ ButtonPaneController* _24;

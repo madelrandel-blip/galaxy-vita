@@ -36,6 +36,9 @@ namespace {
 extern "C" void port_zoom_menu(int selecting);
 extern "C" void port_settings_panel_draw(int flags);
 #endif
+#if defined(TARGET_PC) && defined(_WIN32)
+#include "port/pc_menu.h"
+#endif
 
 namespace NrvPauseMenu {
     NEW_NERVE(PauseMenuNrvSelecting, PauseMenu, Selecting);
@@ -44,6 +47,9 @@ namespace NrvPauseMenu {
     NEW_NERVE(PauseMenuNrvConfirm, PauseMenu, Confirm);
     NEW_NERVE(PauseMenuNrvGameDataSave, PauseMenu, GameDataSave);
     NEW_NERVE(PauseMenuNrvLuigiLetter, PauseMenu, LuigiLetter);
+#if defined(TARGET_PC) && defined(_WIN32)
+    NEW_NERVE(PauseMenuNrvPortSettings, PauseMenu, PortSettings);
+#endif
 }  // namespace NrvPauseMenu
 
 PauseMenu::PauseMenu()
@@ -110,6 +116,9 @@ void PauseMenu::init(const JMapInfoIter& rIter) {
     } else {
         MR::hidePaneRecursive(this, "LetterButton");
     }
+#if defined(TARGET_PC) && defined(_WIN32)
+    port_pc_menu_init(this);
+#endif
 
     initNerve(GET_NERVE(PauseMenu, PauseMenuNrvSelecting));
 }
@@ -150,6 +159,9 @@ void PauseMenu::appear() {
 
     setNerve(GET_NERVE(PauseMenu, PauseMenuNrvSelecting));
     LayoutActor::appear();
+#if defined(TARGET_PC) && defined(_WIN32)
+    port_pc_menu_appear();
+#endif
 
     const char* pCoinPanePos = "CPosition1";
     const char* pPiecePanePos = "PPosition1";
@@ -185,6 +197,9 @@ void PauseMenu::draw() const {
 
 void PauseMenu::kill() {
     LayoutActor::kill();
+#if defined(TARGET_PC) && defined(_WIN32)
+    port_pc_menu_kill();
+#endif
 #ifdef TARGET_PC
     port_vr_pause_menu(0);
     port_zoom_menu(0);
@@ -284,6 +299,9 @@ void PauseMenu::forceToWaitAllButton() {
     if (!b) {
         _38->forceToWait();
     }
+#if defined(TARGET_PC) && defined(_WIN32)
+    port_pc_menu_force_wait();
+#endif
 }
 
 void PauseMenu::exeSelecting() {
@@ -293,6 +311,12 @@ void PauseMenu::exeSelecting() {
     if (isPointingTrigger) {
         MR::startSystemSE("SE_SY_SELECT_PAUSE_ITEM", -1, -1);
     }
+#if defined(TARGET_PC) && defined(_WIN32)
+    if (port_pc_menu_select()) {
+        setNerve(GET_NERVE(PauseMenu, PauseMenuNrvPortSettings));
+        return;
+    }
+#endif
 
     bool isLetterHidden;
 
@@ -353,6 +377,9 @@ void PauseMenu::exeDecided() {
 void PauseMenu::exeDisappear() {
     if (MR::isFirstStep(this)) {
         startPaneAnimWithoutButton("End");
+#if defined(TARGET_PC) && defined(_WIN32)
+        port_pc_menu_hide();
+#endif
         _20->disappear();
 
         if (_24 != nullptr) {
@@ -374,6 +401,26 @@ void PauseMenu::exeDisappear() {
         }
     }
 }
+
+#if defined(TARGET_PC) && defined(_WIN32)
+// The Settings button's screen: Back and Quit step aside while the settings' own buttons are up.
+void PauseMenu::exePortSettings() {
+    if (MR::isFirstStep(this)) {
+        _20->disappear();
+        if (_24 != nullptr) {
+            _24->disappear();
+        }
+    }
+    if (port_pc_menu_settings_step(MR::isFirstStep(this))) {
+        _20->appear();
+        if (_24 != nullptr) {
+            _24->appear();
+        }
+        port_pc_menu_appear();
+        setNerve(GET_NERVE(PauseMenu, PauseMenuNrvSelecting));
+    }
+}
+#endif
 
 void PauseMenu::exeConfirm() {
     if (MR::isFirstStep(this)) {

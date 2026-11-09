@@ -490,6 +490,8 @@ void PeToken(uint16_t token, bool interrupt) {
 // that produces frames faster than they can be drawn.
 std::mutex sMtx;
 std::condition_variable sCv;
+// A render size asked for by the PC settings menu (w << 16 | h; 0: none), applied by the render thread before its next frame.
+std::atomic<uint32_t> sPendingRenderSize{0};
 std::vector<vgx::CmdBuf*> sFree, sJobs;
 unsigned sMaxInFlight = 1;
 // How many frames the back end may hold at once (the one it draws and the ones waiting for it; sMaxInFlight + 1 buffers exist).
@@ -635,6 +637,7 @@ void RenderMain() {
         // reference run. A frame that is captured is always drawn in full.
         const bool skip = sSkipWhenBehind && !cap && sJobs.size() > 1;
         lk.unlock();
+        if (const uint32_t rs = sPendingRenderSize.exchange(0)) vgx::backend::SetFixedRenderSize(int(rs >> 16), int(rs & 0xFFFF));
         vgx::backend::SetSkipDraws(skip);
         vgx::backend::RequestCapture(cap);
         const int64_t tExec = PORT_RUNTIME_DIAGNOSTICS && sPerfSeconds > 0 ? port_host_time_ns() : 0;
@@ -1009,6 +1012,11 @@ extern "C" void port_vgx_marker(uint32_t kind) {
 // The front end's CPU time at its last display copy (perf.cpp's slow-turn line compares it across a turn).
 extern "C" int64_t port_vgx_player_cpu_us(void) { return sPlCpuUs.load(std::memory_order_relaxed); }
 extern "C" int port_vgx_active(void) { return sActive.load(std::memory_order_relaxed) ? 1 : 0; }
+extern "C" void port_vgx_request_render_size(int w, int h) {
+    if (w <= 0 || h <= 0 || w > 0xFFFF || h > 0xFFFF) return;
+    sPendingRenderSize.store((uint32_t(w) << 16) | uint32_t(h));
+    sCv.notify_all();
+}
 // Pictures the front end has handed to the back end that it has not finished drawing (the one being
 // drawn included): the frame-skip rule in port/perf.cpp reads it.
 extern "C" unsigned port_vgx_backend_pending(void) {
@@ -1529,6 +1537,7 @@ extern "C" void port_gx_select_backend(void) {
 extern "C" void port_gx_use_recorder_backend(void);
 extern "C" void port_gx_select_backend(void) { port_gx_use_recorder_backend(); }
 extern "C" int port_vgx_active(void) { return 0; }
+extern "C" void port_vgx_request_render_size(int, int) {}
 extern "C" size_t port_vgx_consume(const uint8_t*, size_t len) { return len; }
 extern "C" int port_vgx_player(void) { return 0; }
 extern "C" int port_vgx_seg_idle(void) { return 0; }

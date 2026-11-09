@@ -19,6 +19,7 @@
 #include <string>
 
 #include "port/input.h"
+#include "port/pc_settings.h"
 #include "port/port.h"
 
 extern "C" void port_boot(const char*, const char*);
@@ -174,9 +175,17 @@ int main(int argc, char** argv) {
     if (!getenv("PETARI_BACKEND")) _putenv_s("PETARI_BACKEND", "vgx");
     // (desktop default 1 drops the drawing of frames that queue up behind a slow software GL; a real GPU keeps up)
     if (!getenv("GXV_SKIP_BEHIND")) _putenv_s("GXV_SKIP_BEHIND", "0");
-    // Render resolution: 1080 lines by default (the Wii's EFB is 640x456; the picture keeps that shape and is
-    // stretched to 16:9 on screen as on a TV). GXV_RENDER_SIZE=WxH chooses another, 640x456 is the original.
-    if (!getenv("GXV_RENDER_SIZE")) _putenv_s("GXV_RENDER_SIZE", "1516x1080");
+    // Graphics settings (<saves>/settings-pc.ini, the pause menu's Settings). Render resolution: 1080 lines by default
+    // (the Wii's EFB is 640x456; the picture keeps that shape and is stretched to 16:9 on screen as on a TV).
+    // GXV_RENDER_SIZE=WxH overrides it for a session.
+    port_pc_settings_init(saves.c_str());
+    if (!getenv("GXV_RENDER_SIZE")) {
+        int rw = 0, rh = 0;
+        port_pc_res_size(port_pc_res_index(), &rw, &rh);
+        char size[32];
+        snprintf(size, sizeof size, "%dx%d", rw, rh);
+        _putenv_s("GXV_RENDER_SIZE", size);
+    }
     if (!getenv("PETARI_SHADER_CACHE")) _putenv_s("PETARI_SHADER_CACHE", (saves + "/shaders.bin").c_str());
 
     PortPadState pad{};

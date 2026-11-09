@@ -30,6 +30,7 @@
 #include <cstring>
 
 #include "port/input.h"
+#include "port/pc_settings.h"
 
 namespace vgx::host {
 
@@ -162,7 +163,7 @@ void Pump() {
             if (g_pad && !SDL_GameControllerGetAttached(g_pad)) { SDL_GameControllerClose(g_pad); g_pad = nullptr; OpenFirstPad(); }
             break;
         case SDL_KEYDOWN:
-            if (e.key.keysym.scancode == SDL_SCANCODE_F3) g_showFps = !g_showFps;
+            if (e.key.keysym.scancode == SDL_SCANCODE_F3) port_pc_set_fps_counter(!port_pc_fps_counter());
             if (e.key.keysym.scancode == SDL_SCANCODE_F11 ||
                 (e.key.keysym.scancode == SDL_SCANCODE_RETURN && (e.key.keysym.mod & KMOD_ALT)))
                 ToggleFullscreen();
@@ -251,7 +252,13 @@ bool Present(unsigned efb, int x, int y, int w, int h) {
     // (window rows run bottom-up: the view's top edge is at dh - g_viewY)
     glBlitFramebuffer(x, sy0, x + w, sy1, g_viewX, dh - g_viewY, g_viewX + g_viewW, dh - g_viewY - g_viewH, GL_COLOR_BUFFER_BIT,
                       GL_LINEAR);
+    g_showFps = port_pc_fps_counter() != 0;  // (the pause menu's Settings, F3, settings-pc.ini)
     if (g_showFps) DrawFps(dw, dh);
+    {
+        static int vsyncNow = -1;
+        const int vsync = port_pc_vsync() ? 1 : 0;
+        if (vsync != vsyncNow) { SDL_GL_SetSwapInterval(vsync); vsyncNow = vsync; }
+    }
     SDL_GL_SwapWindow(g_window);
     glBindFramebuffer(GL_FRAMEBUFFER, efb);
     Pump();
@@ -268,7 +275,6 @@ bool CreateContext() {
         return false;
     }
     if (const char* e = std::getenv("PETARI_FLIPY")) g_flipY = std::atoi(e) != 0;
-    if (const char* e = std::getenv("PETARI_FPS")) g_showFps = std::atoi(e) != 0;
     if (const char* e = std::getenv("PETARI_ASPECT")) {
         int a = 0, b = 0;
         if (std::sscanf(e, "%d:%d", &a, &b) == 2 && a > 0 && b > 0) g_aspect = (float)a / b;
@@ -298,8 +304,6 @@ bool CreateContext() {
     g_context = SDL_GL_CreateContext(g_window);
     if (!g_context) { VGX_ERR("SDL_GL_CreateContext (GLES 3.0) failed: %s\n", SDL_GetError()); return false; }
     SDL_GL_MakeCurrent(g_window, g_context);
-    const char* vs = std::getenv("PETARI_VSYNC");
-    SDL_GL_SetSwapInterval(vs ? std::atoi(vs) : 1);
     std::fprintf(stderr, "[vgx-sdl] GL %s / %s\n", (const char*)glGetString(GL_VERSION), (const char*)glGetString(GL_RENDERER));
     if (std::getenv("PETARI_FULLSCREEN")) ToggleFullscreen();
     OpenFirstPad();

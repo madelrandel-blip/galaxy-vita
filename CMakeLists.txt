@@ -147,7 +147,8 @@ elseif(WIN32)
   endif()
   list(FILTER PLATFORM_SRCS EXCLUDE REGEX "/xr/xr_app\\.cpp$")  # (as Linux: the VR glue the game links against stays)
   find_package(SDL2 REQUIRED)
-  add_executable(game $<TARGET_OBJECTS:decomp> ${PLATFORM_SRCS} platform/windows/main.cpp platform/windows/win_compat.c)
+  add_executable(game $<TARGET_OBJECTS:decomp> ${PLATFORM_SRCS} platform/windows/main.cpp platform/windows/win_compat.c
+                      platform/windows/pc_settings.cpp platform/windows/pc_menu.cpp)
   set_target_properties(game PROPERTIES OUTPUT_NAME galaxy)
   set(GALAXY_NATIVE_IMAGE_BASE "0x98000000" CACHE STRING "32-bit game image base")
   target_link_options(game PRIVATE -fuse-ld=lld -Wl,--image-base=${GALAXY_NATIVE_IMAGE_BASE} -Wl,--disable-dynamicbase

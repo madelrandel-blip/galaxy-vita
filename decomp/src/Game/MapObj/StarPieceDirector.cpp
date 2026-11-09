@@ -5,6 +5,10 @@
 #include "Game/Scene/SceneObjHolder.hpp"
 #include "Game/Screen/StarPointerDirector.hpp"
 #include "Game/Util.hpp"
+#ifdef TARGET_PC
+#include <cstdlib>
+extern "C" void port_log(const char*, ...);
+#endif
 
 void StarPieceDirector_FORCE_MATCH_SDATA2() {
     (void)0.0f;
@@ -478,6 +482,19 @@ bool StarPieceShooter::shoot() {
     }
 #ifdef TARGET_PC
     deadStarPiece->mThrownFromVr = vrShot;
+    {
+        static int log = -1;
+        if (log < 0) { const char* e = getenv("GXV_AIM_LOG"); log = e && *e && *e != '0'; }
+        if (log) {
+            TVec2f cur;
+            MR::getCorePadPointingPosBasedOnScreen(&cur, _A0);
+            const TVec3f* pp = MR::getPlayerPos();
+            const TVec3f* wp = MR::getStarPointerWorldPosUsingDepth(_A0);
+            port_log("aim: cursor %.0f,%.0f goal %.0f,%.0f,%.0f world %.0f,%.0f,%.0f player %.0f,%.0f,%.0f sensor %p(%p,%p) cam %.0f,%.0f,%.0f",
+                     cur.x, cur.y, position.x, position.y, position.z, wp->x, wp->y, wp->z, pp->x, pp->y, pp->z, (void*)pSensor, (void*)_90,
+                     (void*)_98, shootFrom.x, shootFrom.y, shootFrom.z);
+        }
+    }
 #endif
 
     return true;

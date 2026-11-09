@@ -22,12 +22,16 @@
 
 #include <SDL2/SDL.h>
 #include <GLES3/gl3.h>
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>  // (SetEnvironmentVariableA: ANGLE's platform for the Direct3D 9 attempt)
 
 #include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 #include "port/input.h"
 #include "port/pc_settings.h"
@@ -228,6 +232,94 @@ void DrawFps(int dw, int dh) {
     (void)dw;
 }
 
+// ---- OpenGL ES 2.0 contexts (DirectX 9 graphics through ANGLE's Direct3D 9 renderer): no glBlitFramebuffer, so the picture
+// goes to the window as a textured rectangle drawn from the EFB's colour texture.
+bool g_es2 = false;
+GLuint g_blitProg = 0;
+GLint g_blitSrc = -1, g_blitTex = -1;
+
+GLuint CompileShader(GLenum type, const char* src) {
+    GLuint sh = glCreateShader(type);
+    glShaderSource(sh, 1, &src, nullptr);
+    glCompileShader(sh);
+    GLint ok = 0;
+    glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
+    if (!ok) {
+        char log[512];
+        glGetShaderInfoLog(sh, sizeof log, nullptr, log);
+        std::fprintf(stderr, "[vgx-sdl] present shader: %s\n", log);
+    }
+    return sh;
+}
+
+bool MakeBlitProgram() {
+    static const char* kVs =
+        "attribute vec2 aPos;\n"
+        "uniform vec4 uSrc;\n"
+        "varying vec2 vUv;\n"
+        "void main() {\n"
+        "    vec2 t = aPos * 0.5 + 0.5;\n"
+        "    vUv = uSrc.xy + vec2(t.x, 1.0 - t.y) * uSrc.zw;\n"
+        "    gl_Position = vec4(aPos, 0.0, 1.0);\n"
+        "}\n";
+    static const char* kFs =
+        "precision mediump float;\n"
+        "uniform sampler2D uTex;\n"
+        "varying vec2 vUv;\n"
+        "void main() { gl_FragColor = vec4(texture2D(uTex, vUv).rgb, 1.0); }\n";
+    g_blitProg = glCreateProgram();
+    glAttachShader(g_blitProg, CompileShader(GL_VERTEX_SHADER, kVs));
+    glAttachShader(g_blitProg, CompileShader(GL_FRAGMENT_SHADER, kFs));
+    glBindAttribLocation(g_blitProg, 0, "aPos");
+    glLinkProgram(g_blitProg);
+    GLint ok = 0;
+    glGetProgramiv(g_blitProg, GL_LINK_STATUS, &ok);
+    g_blitSrc = glGetUniformLocation(g_blitProg, "uSrc");
+    g_blitTex = glGetUniformLocation(g_blitProg, "uTex");
+    return ok != 0;
+}
+
+// Draws EFB columns x..x+w, rows y..y+h into the window's view (the default framebuffer is bound).
+void PresentEs2(unsigned efb, int x, int y, int w, int h, int dw, int dh) {
+    GLint tex = 0;
+    glBindFramebuffer(GL_FRAMEBUFFER, efb);
+    glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &tex);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    int tw = 0, th = 0;
+    backend::RenderTargetSize(tw, th);
+    if (!tex || tw <= 0 || th <= 0 || !g_blitProg) return;
+    glViewport(g_viewX, dh - g_viewY - g_viewH, g_viewW, g_viewH);
+    glDisable(GL_BLEND);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glDisable(GL_STENCIL_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glUseProgram(g_blitProg);
+    // (the picture's top row: EFB row y when flipped - the default - else y + h)
+    const float u0 = float(x) / tw, du = float(w) / tw;
+    const float vTop = g_flipY ? float(y) / th : float(y + h) / th, dv = (g_flipY ? float(h) : -float(h)) / th;
+    glUniform4f(g_blitSrc, u0, vTop, du, dv);
+    glUniform1i(g_blitTex, 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, (GLuint)tex);
+    GLint minF = 0, magF = 0;
+    glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &minF);
+    glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &magF);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    GLint attribOn = 0;
+    glGetVertexAttribiv(0, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &attribOn);
+    static const float kQuad[8] = {-1, -1, 1, -1, -1, 1, 1, 1};
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, kQuad);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    if (!attribOn) glDisableVertexAttribArray(0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, minF);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, magF);
+    glViewport(0, 0, dw, dh);
+}
+
 bool Present(unsigned efb, int x, int y, int w, int h) {
     if (efb == 0 || w <= 0 || h <= 0) { Pump(); return false; }
     int dw = 1, dh = 1;
@@ -247,11 +339,15 @@ bool Present(unsigned efb, int x, int y, int w, int h) {
     glViewport(0, 0, dw, dh);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, efb);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-    // (window rows run bottom-up: the view's top edge is at dh - g_viewY)
-    glBlitFramebuffer(x, sy0, x + w, sy1, g_viewX, dh - g_viewY, g_viewX + g_viewW, dh - g_viewY - g_viewH, GL_COLOR_BUFFER_BIT,
-                      GL_LINEAR);
+    if (g_es2) {
+        PresentEs2(efb, x, y, w, h, dw, dh);
+    } else {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, efb);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        // (window rows run bottom-up: the view's top edge is at dh - g_viewY)
+        glBlitFramebuffer(x, sy0, x + w, sy1, g_viewX, dh - g_viewY, g_viewX + g_viewW, dh - g_viewY - g_viewH, GL_COLOR_BUFFER_BIT,
+                          GL_LINEAR);
+    }
     g_showFps = port_pc_fps_counter() != 0;  // (the pause menu's Settings, F3, settings-pc.ini)
     if (g_showFps) DrawFps(dw, dh);
     {
@@ -281,7 +377,6 @@ bool CreateContext() {
         else g_aspect = 0.0f;  // anything else: stretch
     }
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
@@ -298,12 +393,45 @@ bool CreateContext() {
         if (w > usable.w * 9 / 10) { w = usable.w * 9 / 10; h = w * 9 / 16; }
     }
     if (const char* e = std::getenv("PETARI_WINDOW")) std::sscanf(e, "%dx%d", &w, &h);
-    g_window = SDL_CreateWindow("Super Mario Galaxy (PC)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h,
-                                SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
-    if (!g_window) { VGX_ERR("SDL_CreateWindow failed: %s\n", SDL_GetError()); return false; }
-    g_context = SDL_GL_CreateContext(g_window);
-    if (!g_context) { VGX_ERR("SDL_GL_CreateContext (GLES 3.0) failed: %s\n", SDL_GetError()); return false; }
+    // OpenGL ES 3.0 (Direct3D 11 through ANGLE), else ES 2.0, else ES 2.0 on ANGLE's Direct3D 9 renderer (DirectX 9 graphics,
+    // or Windows 7 without the Platform Update's DXGI 1.2). An ANGLE_DEFAULT_PLATFORM set by hand is kept for every attempt.
+    struct Attempt { int major; const char* platform; const char* what; };
+    static const Attempt kAttempts[] = {{3, nullptr, "OpenGL ES 3.0"}, {2, nullptr, "OpenGL ES 2.0"}, {2, "d3d9", "OpenGL ES 2.0 on Direct3D 9"}};
+    const bool platformByHand = std::getenv("ANGLE_DEFAULT_PLATFORM") != nullptr;
+    std::string failures;
+    for (const Attempt& a : kAttempts) {
+        if (a.platform && platformByHand) continue;
+        if (a.platform) {
+            _putenv_s("ANGLE_DEFAULT_PLATFORM", a.platform);  // (ANGLE reads it at eglInitialize: the C runtime's and Windows' copies)
+            SetEnvironmentVariableA("ANGLE_DEFAULT_PLATFORM", a.platform);
+        }
+        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, a.major);
+        g_window = SDL_CreateWindow("Super Mario Galaxy (PC)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h,
+                                    SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+        if (g_window) g_context = SDL_GL_CreateContext(g_window);
+        if (g_window && g_context) {
+            g_es2 = a.major < 3;
+            std::fprintf(stderr, "[vgx-sdl] graphics: %s\n", a.what);
+            break;
+        }
+        failures += std::string(a.what) + ": " + SDL_GetError() + "\n";
+        std::fprintf(stderr, "[vgx-sdl] %s failed: %s\n", a.what, SDL_GetError());
+        if (g_window) SDL_DestroyWindow(g_window);
+        g_window = nullptr;
+        g_context = nullptr;
+        SDL_GL_UnloadLibrary();  // (a new EGL display for the next attempt)
+    }
+    if (!g_context) {
+        const std::string text =
+            "The game could not start its graphics (OpenGL ES through ANGLE on Direct3D 11 or 9).\n\n" + failures +
+            "\nWindows 7: install Service Pack 1 and the Platform Update (KB2670838), then restart.\n"
+            "Also install the latest driver from your graphics card's maker (not the one from Windows Update).";
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Super Mario Galaxy (PC)", text.c_str(), nullptr);
+        std::fflush(nullptr);
+        std::_Exit(3);
+    }
     SDL_GL_MakeCurrent(g_window, g_context);
+    if (g_es2 && !MakeBlitProgram()) VGX_ERR("present program failed to link\n");
     std::fprintf(stderr, "[vgx-sdl] GL %s / %s\n", (const char*)glGetString(GL_VERSION), (const char*)glGetString(GL_RENDERER));
     if (std::getenv("PETARI_FULLSCREEN")) ToggleFullscreen();
     OpenFirstPad();

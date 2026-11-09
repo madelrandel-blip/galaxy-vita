@@ -10273,6 +10273,10 @@ void RequestCapture(bool enable) { g_capture = enable; }
 void SetPresentHook(PresentHook hook) { g_presentHook = hook; }
 // A new fixed render size between frames (the PC settings menu): the automatic-quality path that resizes the EFB and every
 // target sized from it, taken to a neighbouring single-sample rung and back (TargetSize answers the fixed size for both).
+void RenderTargetSize(int& w, int& h) {
+    w = g_rtW;
+    h = g_rtH;
+}
 void SetFixedRenderSize(int w, int h) {
     if (w <= 0 || h <= 0 || (w == g_fixedW && h == g_fixedH)) return;
     g_fixedW = w;

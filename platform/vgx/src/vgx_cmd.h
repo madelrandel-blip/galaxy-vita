@@ -443,6 +443,8 @@ using PresentHook = bool (*)(unsigned efbFramebuffer, int x, int y, int width, i
 void SetPresentHook(PresentHook hook);
 // Render thread, between frames: a new fixed render size (GXV_RENDER_SIZE at run time).
 void SetFixedRenderSize(int w, int h);
+// The EFB target's size in pixels now (the present hook's rectangle lies inside it).
+void RenderTargetSize(int& w, int& h);
 // Automatic quality (dynamic resolution, vgx_autoq.h): a host whose present hook swaps calls this right after the
 // swap, on the back end's thread. The GPU clock then knows the frame's last scene and times its completion.
 void AutoQualitySwapped();

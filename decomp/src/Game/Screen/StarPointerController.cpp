@@ -47,8 +47,16 @@ void StarPointerController::movement(const f32* pProjectionParams, const f32* pV
 void StarPointerController::storeDataFromCallback(const f32* pProjectionParams, const f32* pViewportParams) {
     TVec3f v1(mInfo.mPos.x, mInfo.mPos.y, static_cast< f32 >(mInfo.mZDepth));
 
-    if (mInfo.mDrawReady == true) {
-        TDDraw::invProject(&mWorldPos, v1, MR::getStarPointerViewMtx(), pProjectionParams, pViewportParams, false);
+    bool ready = mInfo.mDrawReady == true;
+#if defined(TARGET_PC) && !defined(__vita__)
+    // The map ray below needs no depth read back, so it runs every frame: waiting for the draw-sync callback left the
+    // pointer's world position stale for many frames (shots kept going to where the cursor was some time before).
+    ready = ready || MR::isExistSceneObj(SceneObj_CollisionDirector);
+#endif
+    if (ready) {
+        if (mInfo.mDrawReady == true) {
+            TDDraw::invProject(&mWorldPos, v1, MR::getStarPointerViewMtx(), pProjectionParams, pViewportParams, false);
+        }
 #if defined(TARGET_PC) && !defined(__vita__)
         // The port cannot read the EFB depth back (GXPeekZ reports the far
         // plane), so in scenes with collision, what the pointer is on comes

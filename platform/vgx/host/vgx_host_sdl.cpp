@@ -21,6 +21,8 @@
 #include "vgx_cmd.h"
 
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_syswm.h>
+#include <EGL/egl.h>
 #include <GLES3/gl3.h>
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -40,7 +42,69 @@ namespace vgx::host {
 
 namespace {
 SDL_Window* g_window = nullptr;
-SDL_GLContext g_context = nullptr;
+EGLDisplay g_eglDisplay = EGL_NO_DISPLAY;
+EGLSurface g_eglSurface = EGL_NO_SURFACE;
+EGLContext g_eglContext = EGL_NO_CONTEXT;
+
+// The window's drawable size in pixels (the EGL surface's).
+void DrawableSize(int* w, int* h) {
+    EGLint ew = 0, eh = 0;
+    if (g_eglSurface != EGL_NO_SURFACE && eglQuerySurface(g_eglDisplay, g_eglSurface, EGL_WIDTH, &ew) &&
+        eglQuerySurface(g_eglDisplay, g_eglSurface, EGL_HEIGHT, &eh) && ew > 0 && eh > 0) {
+        *w = ew;
+        *h = eh;
+        return;
+    }
+    SDL_GetWindowSize(g_window, w, h);
+}
+
+// One attempt: ANGLE's display for `platform` (EGL_PLATFORM_ANGLE_TYPE_*), a window surface on `hwnd`, an OpenGL ES `major`
+// context, made current. On failure everything it made is let go and `why` says what failed.
+bool TryEgl(HWND hwnd, EGLint platform, int major, std::string& why) {
+    using GetPlatformDisplay = EGLDisplay(EGLAPIENTRY*)(EGLenum, void*, const EGLint*);
+    const auto getPlatformDisplay = reinterpret_cast<GetPlatformDisplay>(eglGetProcAddress("eglGetPlatformDisplayEXT"));
+    char text[160];
+    if (!getPlatformDisplay) { why = "no eglGetPlatformDisplayEXT"; return false; }
+    const EGLint displayAttr[] = {0x3203 /* EGL_PLATFORM_ANGLE_TYPE_ANGLE */, platform, EGL_NONE};
+    EGLDisplay d = getPlatformDisplay(0x3202 /* EGL_PLATFORM_ANGLE_ANGLE */, EGL_DEFAULT_DISPLAY, displayAttr);
+    if (d == EGL_NO_DISPLAY || !eglInitialize(d, nullptr, nullptr)) {
+        std::snprintf(text, sizeof text, "eglInitialize failed (0x%X)", (unsigned)eglGetError());
+        why = text;
+        return false;
+    }
+    eglBindAPI(EGL_OPENGL_ES_API);
+    const EGLint configAttr[] = {EGL_RED_SIZE, 8, EGL_GREEN_SIZE, 8, EGL_BLUE_SIZE, 8, EGL_ALPHA_SIZE, 8, EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+                                 EGL_RENDERABLE_TYPE, major >= 3 ? 0x40 /* EGL_OPENGL_ES3_BIT */ : EGL_OPENGL_ES2_BIT, EGL_NONE};
+    EGLConfig config = nullptr;
+    EGLint count = 0;
+    if (!eglChooseConfig(d, configAttr, &config, 1, &count) || count < 1) {
+        std::snprintf(text, sizeof text, "no OpenGL ES %d configuration (0x%X)", major, (unsigned)eglGetError());
+        why = text;
+        eglTerminate(d);
+        return false;
+    }
+    EGLSurface surface = eglCreateWindowSurface(d, config, reinterpret_cast<EGLNativeWindowType>(hwnd), nullptr);
+    if (surface == EGL_NO_SURFACE) {
+        std::snprintf(text, sizeof text, "eglCreateWindowSurface failed (0x%X)", (unsigned)eglGetError());
+        why = text;
+        eglTerminate(d);
+        return false;
+    }
+    const EGLint contextAttr[] = {EGL_CONTEXT_CLIENT_VERSION, major, EGL_NONE};
+    EGLContext c = eglCreateContext(d, config, EGL_NO_CONTEXT, contextAttr);
+    if (c == EGL_NO_CONTEXT || !eglMakeCurrent(d, surface, surface, c)) {
+        std::snprintf(text, sizeof text, "OpenGL ES %d context failed (0x%X)", major, (unsigned)eglGetError());
+        why = text;
+        if (c != EGL_NO_CONTEXT) eglDestroyContext(d, c);
+        eglDestroySurface(d, surface);
+        eglTerminate(d);
+        return false;
+    }
+    g_eglDisplay = d;
+    g_eglSurface = surface;
+    g_eglContext = c;
+    return true;
+}
 SDL_GameController* g_pad = nullptr;
 bool g_flipY = true;  // (ANGLE / D3D11: the EFB comes out bottom-up relative to the Vita host)
 float g_aspect = 16.0f / 9.0f;  // 0: stretch to the window
@@ -175,7 +239,7 @@ void Pump() {
         case SDL_MOUSEMOTION: {
             int ww = 1, wh = 1, dw = 1, dh = 1;
             SDL_GetWindowSize(g_window, &ww, &wh);
-            SDL_GL_GetDrawableSize(g_window, &dw, &dh);
+            DrawableSize(&dw, &dh);
             const float px = e.motion.x * (float)dw / ww, py = e.motion.y * (float)dh / wh;
             g_cursorX = std::fmax(-1.0f, std::fmin(1.0f, (px - g_viewX) / g_viewW * 2.0f - 1.0f));
             g_cursorY = std::fmax(-1.0f, std::fmin(1.0f, (py - g_viewY) / g_viewH * 2.0f - 1.0f));
@@ -323,7 +387,7 @@ void PresentEs2(unsigned efb, int x, int y, int w, int h, int dw, int dh) {
 bool Present(unsigned efb, int x, int y, int w, int h) {
     if (efb == 0 || w <= 0 || h <= 0) { Pump(); return false; }
     int dw = 1, dh = 1;
-    SDL_GL_GetDrawableSize(g_window, &dw, &dh);
+    DrawableSize(&dw, &dh);
     int vw = dw, vh = dh;
     if (g_aspect > 0.0f) {
         if (dw > dh * g_aspect) vw = (int)std::lround(dh * g_aspect);
@@ -353,9 +417,9 @@ bool Present(unsigned efb, int x, int y, int w, int h) {
     {
         static int vsyncNow = -1;
         const int vsync = port_pc_vsync() ? 1 : 0;
-        if (vsync != vsyncNow) { SDL_GL_SetSwapInterval(vsync); vsyncNow = vsync; }
+        if (vsync != vsyncNow) { eglSwapInterval(g_eglDisplay, vsync); vsyncNow = vsync; }
     }
-    SDL_GL_SwapWindow(g_window);
+    eglSwapBuffers(g_eglDisplay, g_eglSurface);
     glBindFramebuffer(GL_FRAMEBUFFER, efb);
     Pump();
     return true;
@@ -376,14 +440,6 @@ bool CreateContext() {
         if (std::sscanf(e, "%d:%d", &a, &b) == 2 && a > 0 && b > 0) g_aspect = (float)a / b;
         else g_aspect = 0.0f;  // anything else: stretch
     }
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
-    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
-    SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
-    SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
-    SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0);  // (the back end draws into its own framebuffer objects)
     int w = 1280, h = 720;
     SDL_Rect usable;
     if (SDL_GetDisplayUsableBounds(0, &usable) == 0 && (usable.w < w + 40 || usable.h < h + 80)) {
@@ -393,35 +449,37 @@ bool CreateContext() {
         if (w > usable.w * 9 / 10) { w = usable.w * 9 / 10; h = w * 9 / 16; }
     }
     if (const char* e = std::getenv("PETARI_WINDOW")) std::sscanf(e, "%dx%d", &w, &h);
-    // OpenGL ES 3.0 (Direct3D 11 through ANGLE), else ES 2.0, else ES 2.0 on ANGLE's Direct3D 9 renderer (DirectX 9 graphics,
-    // or Windows 7 without the Platform Update's DXGI 1.2). An ANGLE_DEFAULT_PLATFORM set by hand is kept for every attempt.
-    struct Attempt { int major; const char* platform; const char* what; };
-    static const Attempt kAttempts[] = {{3, nullptr, "OpenGL ES 3.0"}, {2, nullptr, "OpenGL ES 2.0"}, {2, "d3d9", "OpenGL ES 2.0 on Direct3D 9"}};
-    const bool platformByHand = std::getenv("ANGLE_DEFAULT_PLATFORM") != nullptr;
+    // The window is plain SDL; its OpenGL ES context is made here with EGL, so that ANGLE's renderer is asked for by name:
+    // OpenGL ES 3.0 on Direct3D 11, else ES 2.0 on Direct3D 11, else ES 2.0 on Direct3D 9 (DirectX 9 graphics, or Windows 7
+    // without the Platform Update's DXGI 1.2). ANGLE_DEFAULT_PLATFORM=d3d9 (set by main.cpp's probe, or by hand) starts there.
+    g_window = SDL_CreateWindow("Super Mario Galaxy (PC)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h,
+                                SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+    if (!g_window) { VGX_ERR("SDL_CreateWindow failed: %s\n", SDL_GetError()); return false; }
+    SDL_SysWMinfo wm;
+    SDL_VERSION(&wm.version);
+    if (!SDL_GetWindowWMInfo(g_window, &wm)) { VGX_ERR("SDL_GetWindowWMInfo failed: %s\n", SDL_GetError()); return false; }
+    const HWND hwnd = wm.info.win.window;
+    constexpr EGLint kD3D11 = 0x3208, kD3D9 = 0x3207;  // EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE / _D3D9_ANGLE
+    struct Attempt { EGLint platform; int major; const char* what; };
+    static const Attempt kAttempts[] = {{kD3D11, 3, "OpenGL ES 3.0 on Direct3D 11"}, {kD3D11, 2, "OpenGL ES 2.0 on Direct3D 11"},
+                                        {kD3D9, 2, "OpenGL ES 2.0 on Direct3D 9"}};
+    const char* forced = std::getenv("ANGLE_DEFAULT_PLATFORM");
+    const bool onlyD3D9 = forced && !std::strcmp(forced, "d3d9");
     std::string failures;
+    bool ok = false;
     for (const Attempt& a : kAttempts) {
-        if (a.platform && platformByHand) continue;
-        if (a.platform) {
-            _putenv_s("ANGLE_DEFAULT_PLATFORM", a.platform);  // (ANGLE reads it at eglInitialize: the C runtime's and Windows' copies)
-            SetEnvironmentVariableA("ANGLE_DEFAULT_PLATFORM", a.platform);
-        }
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, a.major);
-        g_window = SDL_CreateWindow("Super Mario Galaxy (PC)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h,
-                                    SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
-        if (g_window) g_context = SDL_GL_CreateContext(g_window);
-        if (g_window && g_context) {
+        if (onlyD3D9 && a.platform != kD3D9) continue;
+        std::string why;
+        if (TryEgl(hwnd, a.platform, a.major, why)) {
             g_es2 = a.major < 3;
             std::fprintf(stderr, "[vgx-sdl] graphics: %s\n", a.what);
+            ok = true;
             break;
         }
-        failures += std::string(a.what) + ": " + SDL_GetError() + "\n";
-        std::fprintf(stderr, "[vgx-sdl] %s failed: %s\n", a.what, SDL_GetError());
-        if (g_window) SDL_DestroyWindow(g_window);
-        g_window = nullptr;
-        g_context = nullptr;
-        SDL_GL_UnloadLibrary();  // (a new EGL display for the next attempt)
+        failures += std::string(a.what) + ": " + why + "\n";
+        std::fprintf(stderr, "[vgx-sdl] %s failed: %s\n", a.what, why.c_str());
     }
-    if (!g_context) {
+    if (!ok) {
         const std::string text =
             "The game could not start its graphics (OpenGL ES through ANGLE on Direct3D 11 or 9).\n\n" + failures +
             "\nWindows 7: install Service Pack 1 and the Platform Update (KB2670838), then restart.\n"
@@ -430,7 +488,6 @@ bool CreateContext() {
         std::fflush(nullptr);
         std::_Exit(3);
     }
-    SDL_GL_MakeCurrent(g_window, g_context);
     if (g_es2 && !MakeBlitProgram()) VGX_ERR("present program failed to link\n");
     std::fprintf(stderr, "[vgx-sdl] GL %s / %s\n", (const char*)glGetString(GL_VERSION), (const char*)glGetString(GL_RENDERER));
     if (std::getenv("PETARI_FULLSCREEN")) ToggleFullscreen();

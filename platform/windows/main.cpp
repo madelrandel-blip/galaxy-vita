@@ -204,10 +204,12 @@ int main(int argc, char** argv) {
     if (!getenv("GXV_SKIP_BEHIND")) _putenv_s("GXV_SKIP_BEHIND", "0");
     // The picture repairs the Vita build turns on (vita/vgx-game/entry.cpp): the Lumas' colours (TEV inputs read a colour register's
     // low 8 bits), Mario's eyes (the final alpha wraps as on the Wii), and the 1.2 / 1.3 picture and safety fixes. NAME=0 turns one off.
+    // GXV_ANIM_LOD=0: no deferred far models (a PC has the CPU; deferred, the dome map's miniature galaxies stayed at its centre).
     for (const char* kv : {"GXV_TEVWRAP=2", "GXV_FIX_TEVIN=1", "GXV_CLIP_CAPTURE_FIX=1", "GXV_ASTRO_DOME_ZOOM_GUARD=1", "GXV_DSTALPHA_ZERO=1",
                            "GXV_EFB_CREATE_GUARD=1", "GXV_RT_ALLOC_GUARD=1", "GXV_EFB_REBIND_GUARD=1", "GXV_DLCACHE_BOUNDS_GUARD=1",
                            "GXV_GPU_TIMER_GUARD=1", "GXV_FIX_INDPREV=1", "GXV_FIX_DSTA=1", "GXV_FIX_LOGICOP=1", "GXV_FIX_TEXOFF=1",
-                           "GXV_COPYVAR=1", "GXV_LTMERGE=1", "GXV_PALROWS=1", "GXV_FIX_LODBIAS=1", "GXV_FIX_LINES=1"}) {
+                           "GXV_COPYVAR=1", "GXV_LTMERGE=1", "GXV_PALROWS=1", "GXV_FIX_LODBIAS=1", "GXV_FIX_LINES=1",
+                           "GXV_ANIM_LOD=0"}) {
         const std::string pair(kv);
         const size_t eq = pair.find('=');
         const std::string name = pair.substr(0, eq);

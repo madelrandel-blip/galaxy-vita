@@ -279,10 +279,17 @@ void JAISeMgr::calc() {
     }
 }
 
+#if defined(TARGET_PC) && defined(_WIN32)
+extern "C" float port_pc_gain_sfx(void);  // platform/windows/pc_settings.cpp: Settings > Audio > Sound effects
+#endif
 void JAISeMgr::mixOut() {
     PORT_AUDIO_TOUCH();
+    JAISoundParamsMove params = mParams;
+#if defined(TARGET_PC) && defined(_WIN32)
+    params.mParams.mVolume *= port_pc_gain_sfx();
+#endif
     for (int i = 0; i < NUM_CATEGORIES; i++) {
-        mCategoryMgrs[i].JAISeMgr_mixOut_(mParams, mSoundActivity);
+        mCategoryMgrs[i].JAISeMgr_mixOut_(params, mSoundActivity);
     }
 }
 

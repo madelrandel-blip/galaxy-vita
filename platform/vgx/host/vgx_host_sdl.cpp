@@ -6,6 +6,7 @@
 // its event queue all belong to the thread that created the window.
 //
 // Controls (keyboard + mouse)            Controls (game controller)
+// (the defaults: the buttons can be changed in the pause menu's Settings > Controls; movement, D-pad and Home stay fixed)
 //   WASD          Nunchuk stick             left stick     Nunchuk stick
 //   Space         A (jump)                  A / Cross      A (jump)
 //   Mouse left    B (shoot Star Bits)       RB / R1        B (shoot Star Bits)
@@ -37,6 +38,33 @@
 
 #include "port/input.h"
 #include "port/pc_settings.h"
+
+// Names of inputs for the Controls page (port/pc_settings.h).
+extern "C" void port_pc_input_name(int code, int pad, char* out, int size) {
+    if (size <= 0) return;
+    out[0] = 0;
+    if (code < 0) {
+        std::snprintf(out, size, "-");
+        return;
+    }
+    if (pad) {
+        static const char* const kPad[] = {"A", "B", "X", "Y", "Back", "Guide", "Start", "LS", "RS", "LB", "RB",
+                                           "Up", "Down", "Left", "Right", "Misc", "P1", "P2", "P3", "P4", "Touchpad"};
+        if (code == PORT_PC_PAD_LT) std::snprintf(out, size, "LT");
+        else if (code == PORT_PC_PAD_RT) std::snprintf(out, size, "RT");
+        else if (code < int(sizeof kPad / sizeof kPad[0])) std::snprintf(out, size, "%s", kPad[code]);
+        else std::snprintf(out, size, "Pad %d", code);
+        return;
+    }
+    if (code >= PORT_PC_MOUSE) {
+        static const char* const kMouse[] = {"?", "Mouse L", "Mouse M", "Mouse R", "Mouse 4", "Mouse 5"};
+        const int m = code - PORT_PC_MOUSE;
+        std::snprintf(out, size, "%s", m > 0 && m <= 5 ? kMouse[m] : "Mouse");
+        return;
+    }
+    const char* name = SDL_GetScancodeName(static_cast<SDL_Scancode>(code));
+    std::snprintf(out, size, "%s", name && *name ? name : "?");
+}
 
 namespace vgx::host {
 
@@ -152,6 +180,36 @@ void ToggleFullscreen() {
     SyncFullscreen();
 }
 
+int g_captureQuiet = 0;
+
+// The controller's gyroscope turns into pointer movement (Settings > Controls > Gyroscope): turning it left / right moves the
+// pointer across, tilting it up / down moves it up and down. About 40 degrees cross the picture.
+void Gyro() {
+#if SDL_VERSION_ATLEAST(2, 0, 14)
+    static SDL_GameController* enabledOn = nullptr;
+    static Uint64 last = 0;
+    const Uint64 now = SDL_GetPerformanceCounter();
+    float dt = last ? float(double(now - last) / double(SDL_GetPerformanceFrequency())) : 0.0f;
+    last = now;
+    if (dt > 0.1f) dt = 0.1f;
+    const bool want = port_pc_gyro() != 0 && g_pad && SDL_GameControllerHasSensor(g_pad, SDL_SENSOR_GYRO);
+    if (want != (enabledOn == g_pad && g_pad)) {
+        if (g_pad && SDL_GameControllerHasSensor(g_pad, SDL_SENSOR_GYRO))
+            SDL_GameControllerSetSensorEnabled(g_pad, SDL_SENSOR_GYRO, want ? SDL_TRUE : SDL_FALSE);
+        enabledOn = want ? g_pad : nullptr;
+    }
+    if (!want) return;
+    float rate[3] = {0, 0, 0};  // radians a second: x pitch, y yaw, z roll
+    if (SDL_GameControllerGetSensorData(g_pad, SDL_SENSOR_GYRO, rate, 3) != 0) return;
+    const float kGain = 2.0f / 0.70f;  // (2 pointer units, the picture's width, per 0.7 radians)
+    const float dx = -rate[1] * dt * kGain, dy = -rate[0] * dt * kGain;
+    if (std::fabs(dx) + std::fabs(dy) < 0.0005f) return;  // (resting noise)
+    g_mouseUsed = false;
+    g_cursorX = std::fmax(-1.0f, std::fmin(1.0f, g_cursorX + dx));
+    g_cursorY = std::fmax(-1.0f, std::fmin(1.0f, g_cursorY + dy));
+#endif
+}
+
 void UpdatePad() {
     PortPadState pad{};
     pad.connected = 1;
@@ -159,40 +217,39 @@ void UpdatePad() {
     const Uint8* k = SDL_GetKeyboardState(nullptr);
     const Uint32 mouse = SDL_GetMouseState(nullptr, nullptr);
     uint32_t b = 0;
-    if (k[SDL_SCANCODE_SPACE]) b |= kA;
-    if (mouse & SDL_BUTTON(SDL_BUTTON_LEFT)) b |= kB;
-    if (k[SDL_SCANCODE_LSHIFT] || k[SDL_SCANCODE_RSHIFT]) b |= kZ;
-    if (k[SDL_SCANCODE_Q]) b |= kC;
+    bool shake = false;
+    // The rebindable actions (the pause menu's Settings > Controls; port/pc_settings.h).
+    auto keyDown = [&](int code) {
+        if (code >= PORT_PC_MOUSE) return (mouse & SDL_BUTTON(code - PORT_PC_MOUSE)) != 0;
+        return code >= 0 && code < SDL_NUM_SCANCODES && k[code] != 0;
+    };
+    auto padDown = [&](int code) {
+        if (!g_pad || code < 0) return false;
+        if (code == PORT_PC_PAD_LT) return SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 12000;
+        if (code == PORT_PC_PAD_RT) return SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 12000;
+        return code < SDL_CONTROLLER_BUTTON_MAX && SDL_GameControllerGetButton(g_pad, (SDL_GameControllerButton)code) != 0;
+    };
+    static const uint32_t kActionBits[PORT_PC_ACT_COUNT] = {kA, kB, 0, kZ, kC, kPlus, kMinus, kOne, kTwo};
+    for (int a = 0; a < PORT_PC_ACT_COUNT; ++a) {
+        if (!keyDown(port_pc_bind_key(a)) && !padDown(port_pc_bind_pad(a))) continue;
+        if (a == PORT_PC_ACT_SPIN) shake = true;
+        else b |= kActionBits[a];
+    }
     if (k[SDL_SCANCODE_LEFT]) b |= kLeft;
     if (k[SDL_SCANCODE_RIGHT]) b |= kRight;
     if (k[SDL_SCANCODE_UP]) b |= kUp;
     if (k[SDL_SCANCODE_DOWN]) b |= kDown;
-    if (k[SDL_SCANCODE_1]) b |= kOne;
-    if (k[SDL_SCANCODE_2]) b |= kTwo;
-    if (k[SDL_SCANCODE_RETURN]) b |= kPlus;
-    if (k[SDL_SCANCODE_BACKSPACE]) b |= kMinus;
     if (k[SDL_SCANCODE_ESCAPE]) b |= kHome;
     float sx = (k[SDL_SCANCODE_D] ? 1.0f : 0.0f) - (k[SDL_SCANCODE_A] ? 1.0f : 0.0f);
     float sy = (k[SDL_SCANCODE_W] ? 1.0f : 0.0f) - (k[SDL_SCANCODE_S] ? 1.0f : 0.0f);
-    bool shake = k[SDL_SCANCODE_E] || (mouse & SDL_BUTTON(SDL_BUTTON_RIGHT));
 
     if (g_pad) {
         auto btn = [](SDL_GameControllerButton x) { return SDL_GameControllerGetButton(g_pad, x) != 0; };
-        if (btn(SDL_CONTROLLER_BUTTON_A)) b |= kA;
-        if (btn(SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)) b |= kB;
-        if (btn(SDL_CONTROLLER_BUTTON_LEFTSHOULDER)) b |= kC;
-        if (btn(SDL_CONTROLLER_BUTTON_Y)) b |= kOne;
-        if (btn(SDL_CONTROLLER_BUTTON_B)) b |= kTwo;
-        if (btn(SDL_CONTROLLER_BUTTON_START)) b |= kPlus;
-        if (btn(SDL_CONTROLLER_BUTTON_BACK)) b |= kMinus;
         if (btn(SDL_CONTROLLER_BUTTON_GUIDE)) b |= kHome;
         if (btn(SDL_CONTROLLER_BUTTON_DPAD_LEFT)) b |= kLeft;
         if (btn(SDL_CONTROLLER_BUTTON_DPAD_RIGHT)) b |= kRight;
         if (btn(SDL_CONTROLLER_BUTTON_DPAD_UP)) b |= kUp;
         if (btn(SDL_CONTROLLER_BUTTON_DPAD_DOWN)) b |= kDown;
-        if (SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 12000) b |= kZ;
-        if (SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 12000) b |= kB;
-        if (btn(SDL_CONTROLLER_BUTTON_X)) shake = true;
         const float lx = Axis(SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_LEFTX));
         const float ly = -Axis(SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_LEFTY));
         if (lx != 0.0f || ly != 0.0f) { sx = lx; sy = ly; }
@@ -203,6 +260,14 @@ void UpdatePad() {
             g_cursorX = std::fmax(-1.0f, std::fmin(1.0f, g_cursorX + rx * 0.04f));
             g_cursorY = std::fmax(-1.0f, std::fmin(1.0f, g_cursorY + ry * 0.04f));
         }
+        Gyro();
+    }
+    // While the Controls page waits for an input to bind, and a moment after, the game sees nothing pressed.
+    if (port_pc_capture_active() >= 0) g_captureQuiet = 20;
+    if (g_captureQuiet > 0) {
+        --g_captureQuiet;
+        b = 0;
+        shake = false;
     }
     const float len = std::sqrt(sx * sx + sy * sy);
     if (len > 1.0f) { sx /= len; sy /= len; }
@@ -237,7 +302,32 @@ void Pump() {
         case SDL_CONTROLLERDEVICEREMOVED:
             if (g_pad && !SDL_GameControllerGetAttached(g_pad)) { SDL_GameControllerClose(g_pad); g_pad = nullptr; OpenFirstPad(); }
             break;
+        case SDL_MOUSEBUTTONDOWN:
+            if (port_pc_capture_active() >= 0) port_pc_capture_feed(PORT_PC_MOUSE + e.button.button, -1, 0);
+            break;
+        case SDL_CONTROLLERBUTTONDOWN:
+            if (port_pc_capture_active() >= 0) {
+                if (e.cbutton.button == SDL_CONTROLLER_BUTTON_GUIDE) port_pc_capture_feed(-1, -1, 1);
+                else port_pc_capture_feed(-1, e.cbutton.button, 0);
+            }
+            break;
+        case SDL_CONTROLLERAXISMOTION:
+            if (port_pc_capture_active() >= 0 && e.caxis.value > 16000) {
+                if (e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT) port_pc_capture_feed(-1, PORT_PC_PAD_LT, 0);
+                if (e.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT) port_pc_capture_feed(-1, PORT_PC_PAD_RT, 0);
+            }
+            break;
         case SDL_KEYDOWN:
+            if (port_pc_capture_active() >= 0 && !e.key.repeat) {
+                const SDL_Scancode sc = e.key.keysym.scancode;
+                // Escape cancels; the keys the game keeps fixed (movement, arrows, F keys) are not taken.
+                if (sc == SDL_SCANCODE_ESCAPE) port_pc_capture_feed(-1, -1, 1);
+                else if (sc != SDL_SCANCODE_W && sc != SDL_SCANCODE_A && sc != SDL_SCANCODE_S && sc != SDL_SCANCODE_D &&
+                         sc != SDL_SCANCODE_LEFT && sc != SDL_SCANCODE_RIGHT && sc != SDL_SCANCODE_UP && sc != SDL_SCANCODE_DOWN &&
+                         !(sc >= SDL_SCANCODE_F1 && sc <= SDL_SCANCODE_F12))
+                    port_pc_capture_feed(sc, -1, 0);
+                break;
+            }
             if (e.key.keysym.scancode == SDL_SCANCODE_F3) port_pc_set_fps_counter(!port_pc_fps_counter());
             if (e.key.keysym.scancode == SDL_SCANCODE_F11 ||
                 (e.key.keysym.scancode == SDL_SCANCODE_RETURN && (e.key.keysym.mod & KMOD_ALT)))

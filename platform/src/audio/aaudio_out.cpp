@@ -375,6 +375,10 @@ bool openStream(u32 rate) {
 
 }  // namespace
 
+#if defined(_WIN32)
+extern "C" float port_pc_gain_master(void);  // platform/windows/pc_settings.cpp: Settings > Audio > Master, 0..2
+#endif
+
 extern "C" void port_audio_submit(const s16* rightLeft, u32 frames, u32 rate) {
     std::lock_guard<std::mutex> lock(sLock);
     sLR.resize(frames * 2);
@@ -384,6 +388,17 @@ extern "C" void port_audio_submit(const s16* rightLeft, u32 frames, u32 rate) {
     }
     mixSpeaker(sLR.data(), frames, rate);
     applySkipGain(sLR.data(), frames, rate);
+#if defined(_WIN32)
+    {
+        const float gain = port_pc_gain_master();
+        if (gain != 1.0f) {
+            for (u32 i = 0; i < frames * 2; i++) {
+                const float v = sLR[i] * gain;
+                sLR[i] = (s16)(v > 32767.0f ? 32767 : v < -32768.0f ? -32768 : (int)v);
+            }
+        }
+    }
+#endif
 
     static bool wavChecked = false;
     if (!wavChecked && !sWavFinished) {

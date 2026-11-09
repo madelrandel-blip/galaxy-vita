@@ -164,7 +164,7 @@ elseif(WIN32)
   else()
     target_link_options(game PRIVATE -static-libstdc++ -Wl,-Bstatic -lc++ -lc++abi -lunwind -lwinpthread -Wl,-Bdynamic)
   endif()
-  target_link_libraries(game PRIVATE SDL2::SDL2 GLESv2 EGL winmm pthread)
+  target_link_libraries(game PRIVATE SDL2::SDL2 GLESv2 EGL winmm comdlg32 z pthread)  # (comdlg32, z: Settings > Game, save import / export)
 else()
   # The game embeds 32-bit pointers. A non-PIE image in the Wii window keeps
   # both native code/data and emulated arenas representable without dlopen.

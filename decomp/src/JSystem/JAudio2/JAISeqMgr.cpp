@@ -120,11 +120,18 @@ void JAISeqMgr::stopSoundID(JAISoundID id) {
     }
 }
 
+#if defined(TARGET_PC) && defined(_WIN32)
+extern "C" float port_pc_gain_music(void);  // platform/windows/pc_settings.cpp: Settings > Audio > Music
+#endif
 void JAISeqMgr::mixOut() {
     PORT_AUDIO_TOUCH();
+    JASSoundParams params = mMove.mParams;
+#if defined(TARGET_PC) && defined(_WIN32)
+    params.mVolume *= port_pc_gain_music();
+#endif
     JSULink< JAISeq >* i;
     for (i = mSeqList.getFirst(); i != mSeqList.getEnd(); i = i->getNext()) {
-        i->getObject()->JAISeqMgr_mixOut_(mMove.mParams, mSoundActivity);
+        i->getObject()->JAISeqMgr_mixOut_(params, mSoundActivity);
     }
 }
 

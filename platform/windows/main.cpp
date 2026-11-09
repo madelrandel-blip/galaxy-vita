@@ -219,6 +219,8 @@ int main(int argc, char** argv) {
     // (the Wii's EFB is 640x456; the picture keeps that shape and is stretched to 16:9 on screen as on a TV).
     // GXV_RENDER_SIZE=WxH overrides it for a session.
     port_pc_settings_init(saves.c_str());
+    // Settings > Game > Language (the game reads it when it starts; PETARI_LANGUAGE still wins for a session).
+    if (!getenv("PETARI_LANGUAGE") && port_pc_language()[0]) _putenv_s("PETARI_LANGUAGE", port_pc_language());
     if (const char* why = chooseAngleDirect3D9()) {
         _putenv_s("ANGLE_DEFAULT_PLATFORM", "d3d9");  // (the C runtime's copy and Windows' own: ANGLE may read either)
         SetEnvironmentVariableA("ANGLE_DEFAULT_PLATFORM", "d3d9");

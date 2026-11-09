@@ -106,11 +106,18 @@ void JAIStreamMgr::stopSoundID(JAISoundID id) {
     }
 }
 
+#if defined(TARGET_PC) && defined(_WIN32)
+extern "C" float port_pc_gain_music(void);  // platform/windows/pc_settings.cpp: Settings > Audio > Music
+#endif
 void JAIStreamMgr::mixOut() {
     PORT_AUDIO_TOUCH();
+    JASSoundParams params = mParams.mParams;
+#if defined(TARGET_PC) && defined(_WIN32)
+    params.mVolume *= port_pc_gain_music();
+#endif
     JSULink< JAIStream >* i;
     for (i = mStreamList.getFirst(); i != nullptr; i = i->getNext()) {
-        i->getObject()->JAIStreamMgr_mixOut_(mParams.mParams, mActivity);
+        i->getObject()->JAIStreamMgr_mixOut_(params, mActivity);
     }
 }
 

@@ -26,6 +26,7 @@ jobs:
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-SDL2
+            mingw-w64-x86_64-zlib
 
       # ANGLE r21358 (msvcrt, D3D11 + D3D9): the newer builds wait with WaitOnAddress, a Windows 8 function
       - name: ANGLE for Windows 7

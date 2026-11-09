@@ -266,6 +266,7 @@ struct Program {
     GLint nMv = 0, nTm = 0, nPtm = 0, nPal = 0, nLt = 0, nTev = 0; // elements to upload (vec4)
     uint32_t vsBytes = 0, fsBytes = 0;                           // size of the program's uniform buffers (estimate from the declarations)
     uint32_t applied[UB_COUNT] = {kNoBlock, kNoBlock, kNoBlock, kNoBlock, kNoBlock, kNoBlock};
+    float projFlatZ = -1.0f;               // (Direct3D 9) the flat depth its u_proj was given with, -1: as the game gave it
     uint64_t serial = 0;
     const CmdBuf* uniformBuffer = nullptr;
     uint64_t usedSerial = 0;               // last frame a draw used it
@@ -337,7 +338,8 @@ void EfbForRead(); // before the EFB is read back (glReadPixels, the host's pres
 GLuint g_ibo = 0, g_whiteTex = 0, g_quadVbo = 0;
 std::vector<GLuint> g_streamVbo; // one per chunk of the frame's vertex arena
 bool g_hasDepth24 = false, g_hasDepthTex = false, g_hasS3tc = false, g_hasMaxLevel = false;
-bool g_d3d9 = false;  // ANGLE's Direct3D 9 renderer (an empty depth range draws nothing there: SetDepthRange)
+bool g_d3d9 = false;  // ANGLE's Direct3D 9 renderer (no empty depth range there: SetDepthRange)
+float g_flatZ = -1.0f; // (Direct3D 9) the depth every vertex of the draw gets (an empty range n .. n), -1: none
 bool g_hasDxt5 = false; // GL_COMPRESSED_RGBA_S3TC_DXT5_EXT (HD texture replacements; decoded to RGBA8 without it)
 bool g_quadClear = true;
 GLuint g_copyProg = 0;
@@ -1289,13 +1291,15 @@ inline void SetViewport(int x, int y, int w, int h) {
     S.vp[0] = x; S.vp[1] = y; S.vp[2] = w; S.vp[3] = h;
 }
 inline void SetDepthRange(float n, float f) {
+#if !defined(__VGX_VITA__)
+    // Direct3D 9 takes no empty depth range (ANGLE's D3DVIEWPORT9 MinZ = MaxZ): the game's depth clears draw with 1 .. 1, which
+    // there left depths a little short of the far plane, and the sky behind them failed its depth test (the clear colour showed).
+    // The range is 0 .. 1 then and the draw's projection gives every vertex z = (2n - 1) w (Draw: u_proj): window depth n exactly.
+    g_flatZ = (g_d3d9 && n == f) ? n : -1.0f;
+    if (g_flatZ >= 0.0f) { n = 0.0f; f = 1.0f; }
+#endif
     if (S.zn == n && S.zf == f) return;
     S.zn = n; S.zf = f;
-#if !defined(__VGX_VITA__)
-    // Direct3D 9 (ANGLE's D3DVIEWPORT9 MinZ = MaxZ) draws nothing with an empty depth range: the game's sky and the title's backdrop
-    // use 1 .. 1. The range opened by 1/65536 below the far end keeps every depth at the far plane but for that sliver.
-    if (g_d3d9 && n == f) { if (f > 0.0f) n = f - 1.0f / 65536.0f; else f = n + 1.0f / 65536.0f; }
-#endif
 #if !defined(__VGX_VITA__)
     {   // (GXV_ZRANGE_LOG=1: each new depth range once, to stderr)
         static const bool zlog = EnvInt("GXV_ZRANGE_LOG", 0) != 0;
@@ -3687,8 +3691,22 @@ void Draw(const CmdBuf& buf, const DrawRec& r) {
 #else
     const auto viaGl = [](int) { return true; };
 #endif
+#if !defined(__VGX_VITA__)
+    if (viaGl(US_PROJ) && p.proj != -1 && r.ublock[UB_PROJ] != kNoBlock && (need(UB_PROJ, 16) || p.projFlatZ != g_flatZ)) {
+        const float* m = u + r.ublock[UB_PROJ];
+        float flat[16];
+        if (g_flatZ >= 0.0f) { // (SetDepthRange: z row = (2n - 1) x the w row, column-major)
+            std::memcpy(flat, m, sizeof flat);
+            const float k = 2.0f * g_flatZ - 1.0f;
+            for (int c = 0; c < 4; ++c) flat[c * 4 + 2] = k * flat[c * 4 + 3];
+            m = flat;
+        }
+        p.projFlatZ = g_flatZ;
+        G(glUniformMatrix4fv(p.proj, 1, GL_FALSE, m));
+#else
     if (viaGl(US_PROJ) && p.proj != -1 && need(UB_PROJ, 16)) {
         G(glUniformMatrix4fv(p.proj, 1, GL_FALSE, u + r.ublock[UB_PROJ]));
+#endif
         ++C.uniformCalls;
         C.uniformBytes += 64;
         if (beprof::g_frame) { ++beprof::g_uniCalls; beprof::g_uniBytes += 64; }

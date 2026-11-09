@@ -1249,6 +1249,9 @@ static void SteadyWorkDone() {
     }
 }
 
+#if defined(_WIN32)
+extern "C" int port_pc_fps_limit(void);  // platform/windows/pc_settings.cpp
+#endif
 static int FrameskipDecide(int allowed) {
     if (PORT_RUNTIME_DIAGNOSTICS) sTurn.kind = allowed ? TurnKind::DrawSelected : TurnKind::RequiredDraw;
     // Testing (the harness has a virtual clock and never falls behind): PETARI_FORCE_SKIP=N leaves out N turns of every N+1.
@@ -1256,9 +1259,16 @@ static int FrameskipDecide(int allowed) {
         const char* e = getenv("PETARI_FORCE_SKIP");
         return e && *e ? (atoi(e) < 0 ? 0 : (atoi(e) > 8 ? 8 : atoi(e))) : 0;
     }());
-    if (forced > 0 && allowed) {
+#if defined(_WIN32)
+    // Settings > Graphics > FPS: 30 on PC is the same rule, one picture every second turn: the game keeps running 60 turns a
+    // second (full speed), only half of them are drawn.
+    const int forcedNow = forced > 0 ? forced : (port_pc_fps_limit() == 30 ? 1 : 0);
+#else
+    const int forcedNow = forced;
+#endif
+    if (forcedNow > 0 && allowed) {
         static int phase = 0;
-        phase = (phase + 1) % (forced + 1);
+        phase = (phase + 1) % (forcedNow + 1);
         if (!phase) return 0;
         sSkippedTurns.fetch_add(1, std::memory_order_relaxed);
         if (PORT_RUNTIME_DIAGNOSTICS) sTurn.kind = TurnKind::ForcedSkip;

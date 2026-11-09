@@ -26,11 +26,11 @@
 namespace {
 constexpr f32 kQuitStep = 75.0f;  // Quit's distance under Back (85 in the layout)
 
-void PlaceButtons(LayoutActor* actor, f32 backButtonY, f32 scale, f32 x = 0.0f) {
+void PlaceButtons(LayoutActor* actor, f32 backButtonY, f32 scale, f32 x = 0.0f, f32 scaleX = 0.0f) {
     if (nw4r::lyt::Pane* p = MR::getPane(actor, "BackButton")) {
         p->mTranslate.x = x;
         p->mTranslate.y = backButtonY;
-        p->mScale.x = scale;
+        p->mScale.x = scaleX > 0.0f ? scaleX : scale;
         p->mScale.y = scale;
     }
     if (nw4r::lyt::Pane* p = MR::getPane(actor, "BackDown")) p->mTranslate.y = -kQuitStep;
@@ -68,11 +68,11 @@ public:
         wide[i] = 0;
         MR::setTextBoxMessageRecursive(this, "NBackDown", wide);
     }
-    void Place(f32 x, f32 center, f32 scale) {
+    void Place(f32 x, f32 center, f32 scale, f32 scaleX) {
         mX = x;
         mCenter = center;
         mScale = scale;
-        PlaceButtons(this, mCenter + kQuitStep * mScale, mScale, mX);
+        PlaceButtons(this, mCenter + kQuitStep * mScale, mScale, mX, scaleX);
     }
     void Show() {
         mLeaving = false;
@@ -98,7 +98,7 @@ enum Id {
     // main
     kGoGraphics, kGoAudio, kGoControls, kGoGame, kClose,
     // graphics
-    kRes, kFsr, kFxaa, kMsaa, kFps, kVsync, kFull,
+    kRes, kFsr, kFxaa, kMsaa, kFps, kVsync, kFull, kFpsLimit,
     // audio (value, minus, plus for each)
     kVolMaster, kVolMasterDown, kVolMasterUp, kVolMusic, kVolMusicDown, kVolMusicUp, kVolSfx, kVolSfxDown, kVolSfxUp,
     // controls
@@ -111,16 +111,21 @@ enum Id {
 struct Item {
     int id;
     f32 x, y, scale;
+    f32 scaleX = 0.0f;  // (0: the same as scale; the round - / + buttons are narrower)
 };
 constexpr f32 kL = -150.0f, kR = 150.0f, kS = 0.55f;
 const Item kMainItems[] = {{kGoGraphics, kL, 54, kS}, {kGoAudio, kL, 2, kS}, {kGoControls, kR, 54, kS}, {kGoGame, kR, 2, kS},
                            {kClose, 0, -76, kS}};
-const Item kGraphicsItems[] = {{kRes, kL, 54, kS},  {kFsr, kL, 2, kS},   {kFxaa, kL, -50, kS}, {kMsaa, kL, -102, kS},
-                               {kFps, kR, 54, kS},  {kVsync, kR, 2, kS}, {kFull, kR, -50, kS}, {kToMain, kR, -102, kS}};
-constexpr f32 kSmall = 0.4f, kSide = 250.0f;
-const Item kAudioItems[] = {{kVolMaster, 0, 54, kS}, {kVolMasterDown, -kSide, 54, kSmall}, {kVolMasterUp, kSide, 54, kSmall},
-                            {kVolMusic, 0, 2, kS},   {kVolMusicDown, -kSide, 2, kSmall},   {kVolMusicUp, kSide, 2, kSmall},
-                            {kVolSfx, 0, -50, kS},   {kVolSfxDown, -kSide, -50, kSmall},   {kVolSfxUp, kSide, -50, kSmall},
+// Graphics: three columns of three (x -195, 0, 195; rows 40, -20, -80) at 50 %.
+constexpr f32 kG = 0.5f, kGx = 195.0f;
+const Item kGraphicsItems[] = {{kRes, -kGx, 40, kG},  {kFsr, 0, 40, kG},       {kFxaa, kGx, 40, kG},
+                               {kMsaa, -kGx, -20, kG}, {kFps, 0, -20, kG},      {kVsync, kGx, -20, kG},
+                               {kFull, -kGx, -80, kG}, {kFpsLimit, 0, -80, kG}, {kToMain, kGx, -80, kG}};
+// Audio: each value with a round arrow button against its left and right end (the value is 140 wide at 55 %).
+constexpr f32 kRound = 0.5f, kRoundX = 0.13f, kSide = 88.0f;
+const Item kAudioItems[] = {{kVolMaster, 0, 54, kS}, {kVolMasterDown, -kSide, 54, kRound, kRoundX}, {kVolMasterUp, kSide, 54, kRound, kRoundX},
+                            {kVolMusic, 0, 2, kS},   {kVolMusicDown, -kSide, 2, kRound, kRoundX},   {kVolMusicUp, kSide, 2, kRound, kRoundX},
+                            {kVolSfx, 0, -50, kS},   {kVolSfxDown, -kSide, -50, kRound, kRoundX},   {kVolSfxUp, kSide, -50, kRound, kRoundX},
                             {kToMain, 0, -102, kS}};
 const Item kControls1Items[] = {{kBindFirst + PORT_PC_ACT_JUMP, kL, 54, kS},   {kBindFirst + PORT_PC_ACT_STARBITS, kL, 2, kS},
                                 {kBindFirst + PORT_PC_ACT_SPIN, kL, -50, kS},  {kBindFirst + PORT_PC_ACT_CROUCH, kL, -102, kS},
@@ -201,8 +206,9 @@ void TextOf(int id, char* text, int size) {
     case kVolMaster: snprintf(text, size, "Master: %d%%", port_pc_volume(PORT_PC_VOL_MASTER)); return;
     case kVolMusic: snprintf(text, size, "Music: %d%%", port_pc_volume(PORT_PC_VOL_MUSIC)); return;
     case kVolSfx: snprintf(text, size, "Effects: %d%%", port_pc_volume(PORT_PC_VOL_SFX)); return;
-    case kVolMasterDown: case kVolMusicDown: case kVolSfxDown: snprintf(text, size, "-"); return;
-    case kVolMasterUp: case kVolMusicUp: case kVolSfxUp: snprintf(text, size, "+"); return;
+    case kVolMasterDown: case kVolMusicDown: case kVolSfxDown: snprintf(text, size, "<"); return;
+    case kVolMasterUp: case kVolMusicUp: case kVolSfxUp: snprintf(text, size, ">"); return;
+    case kFpsLimit: snprintf(text, size, "FPS: %d", port_pc_fps_limit()); return;
     case kGyro: snprintf(text, size, port_pc_gyro() ? "Gyroscope: On" : "Gyroscope: Off"); return;
     case kResetBinds: snprintf(text, size, "Reset controls"); return;
     case kNextPage: snprintf(text, size, "More >"); return;
@@ -248,7 +254,7 @@ void ShowPage(Page p) {
     sPage = p;
     const PageItems page = ItemsOf(p);
     for (int i = 0; i < kPool; ++i) sNote[i][0] = 0;
-    for (int i = 0; i < page.count; ++i) sPool[i]->Place(page.items[i].x, page.items[i].y, page.items[i].scale);
+    for (int i = 0; i < page.count; ++i) sPool[i]->Place(page.items[i].x, page.items[i].y, page.items[i].scale, page.items[i].scaleX);
     Texts();
     for (int i = 0; i < page.count; ++i) sPool[i]->Show();
 }
@@ -300,6 +306,7 @@ Page Activate(int slot, bool& capture, bool& close) {
     case kFps: port_pc_set_fps_counter(!port_pc_fps_counter()); break;
     case kVsync: port_pc_set_vsync(!port_pc_vsync()); break;
     case kFull: port_pc_set_fullscreen(!port_pc_fullscreen()); break;
+    case kFpsLimit: port_pc_set_fps_limit(port_pc_fps_limit() == 60 ? 30 : 60); break;
     case kVolMaster: StepVolume(PORT_PC_VOL_MASTER, 10, true); break;
     case kVolMasterDown: StepVolume(PORT_PC_VOL_MASTER, -10, false); break;
     case kVolMasterUp: StepVolume(PORT_PC_VOL_MASTER, 10, false); break;

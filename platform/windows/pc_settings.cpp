@@ -60,7 +60,7 @@ const Action kActions[PORT_PC_ACT_COUNT] = {
     {"two", "Button 2", 31 /* 2 */, 1 /* B */},
 };
 std::atomic<int> sKey[PORT_PC_ACT_COUNT], sPad[PORT_PC_ACT_COUNT];
-std::atomic<int> sGyro{0};
+std::atomic<int> sGyro{0}, sFpsLimit{60};
 std::atomic<int> sCapture{-1}, sCaptureResult{0};
 char sLanguage[32];
 
@@ -78,7 +78,7 @@ void Save() {
     fprintf(f, "resolution=%s\nfps_counter=%d\nvsync=%d\nfxaa=%d\nmsaa=%d\nfsr=%d\nfullscreen=%d\n", kRes[sRes.load()].name,
             sFps.load(), sVsync.load(), sFxaa.load(), sMsaa.load(), sFsr.load(), sFull.load());
     for (int i = 0; i < PORT_PC_VOL_COUNT; ++i) fprintf(f, "%s=%d\n", kVolKey[i], sVol[i].load());
-    fprintf(f, "gyro=%d\nlanguage=%s\n", sGyro.load(), sLanguage);
+    fprintf(f, "fps_limit=%d\ngyro=%d\nlanguage=%s\n", sFpsLimit.load(), sGyro.load(), sLanguage);
     fprintf(f, "# controls: bind_<action>=<keyboard>,<controller> (SDL scancode or 1000 + mouse button; SDL controller button, 100 LT, 101 RT; -1 none)\n");
     for (int i = 0; i < PORT_PC_ACT_COUNT; ++i) fprintf(f, "bind_%s=%d,%d\n", kActions[i].id, sKey[i].load(), sPad[i].load());
     fclose(f);
@@ -116,6 +116,8 @@ extern "C" void port_pc_settings_init(const char* saveRoot) {
                 sFsr = atoi(v) != 0;
             } else if (!strcmp(line, "fullscreen")) {
                 sFull = atoi(v) != 0;
+            } else if (!strcmp(line, "fps_limit")) {
+                sFpsLimit = atoi(v) == 30 ? 30 : 60;
             } else if (!strcmp(line, "gyro")) {
                 sGyro = atoi(v) != 0;
             } else if (!strcmp(line, "language")) {
@@ -463,4 +465,10 @@ extern "C" void port_pc_restart(void) {
     }
     fflush(nullptr);
     _exit(0);
+}
+
+extern "C" int port_pc_fps_limit(void) { return sFpsLimit.load(std::memory_order_relaxed); }
+extern "C" void port_pc_set_fps_limit(int fps) {
+    sFpsLimit = fps == 30 ? 30 : 60;
+    Save();
 }

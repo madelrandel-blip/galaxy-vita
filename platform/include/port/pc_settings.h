@@ -29,6 +29,8 @@ int port_pc_fsr(void);            // AMD FidelityFX Super Resolution 1 (EASU + R
 void port_pc_set_fsr(int on);
 int port_pc_fullscreen(void);     // 1: fullscreen (the desktop's size), 0: a window
 void port_pc_set_fullscreen(int on);
+int port_pc_fps_limit(void);       // 60, or 30 (the game still runs at full speed: every second picture is drawn)
+void port_pc_set_fps_limit(int fps);
 void port_pc_apply_start(void);   // the renderer's side of the settings, once at start-up
 
 // Audio: percentages. Master 0..200 (the output, after the game's mix), music and sound effects 0..100 (the game's own mix:

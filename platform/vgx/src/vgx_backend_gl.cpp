@@ -337,6 +337,7 @@ void EfbForRead(); // before the EFB is read back (glReadPixels, the host's pres
 GLuint g_ibo = 0, g_whiteTex = 0, g_quadVbo = 0;
 std::vector<GLuint> g_streamVbo; // one per chunk of the frame's vertex arena
 bool g_hasDepth24 = false, g_hasDepthTex = false, g_hasS3tc = false, g_hasMaxLevel = false;
+bool g_d3d9 = false;  // ANGLE's Direct3D 9 renderer (an empty depth range draws nothing there: SetDepthRange)
 bool g_hasDxt5 = false; // GL_COMPRESSED_RGBA_S3TC_DXT5_EXT (HD texture replacements; decoded to RGBA8 without it)
 bool g_quadClear = true;
 GLuint g_copyProg = 0;
@@ -1289,6 +1290,12 @@ inline void SetViewport(int x, int y, int w, int h) {
 }
 inline void SetDepthRange(float n, float f) {
     if (S.zn == n && S.zf == f) return;
+    S.zn = n; S.zf = f;
+#if !defined(__VGX_VITA__)
+    // Direct3D 9 (ANGLE's D3DVIEWPORT9 MinZ = MaxZ) draws nothing with an empty depth range: the game's sky and the title's backdrop
+    // use 1 .. 1. The range opened by 1/65536 below the far end keeps every depth at the far plane but for that sliver.
+    if (g_d3d9 && n == f) { if (f > 0.0f) n = f - 1.0f / 65536.0f; else f = n + 1.0f / 65536.0f; }
+#endif
 #if !defined(__VGX_VITA__)
     {   // (GXV_ZRANGE_LOG=1: each new depth range once, to stderr)
         static const bool zlog = EnvInt("GXV_ZRANGE_LOG", 0) != 0;
@@ -1301,7 +1308,6 @@ inline void SetDepthRange(float n, float f) {
 #endif
     G(glDepthRangef(n, f));
     ++C.stateCalls;
-    S.zn = n; S.zf = f;
 }
 inline void SetBlendOff() {
     if (S.blendOn == 0) return;
@@ -7388,6 +7394,10 @@ bool Init(int renderWidth, int renderHeight) {
     const char* ext = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
     const char* ver = reinterpret_cast<const char*>(glGetString(GL_VERSION));
     g_hasDepth24 = ext && std::strstr(ext, "GL_OES_depth24");
+    {
+        const char* rend = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+        g_d3d9 = rend && std::strstr(rend, "Direct3D9");
+    }
     g_hasDepthTex = ext && std::strstr(ext, "GL_OES_depth_texture") && EnvInt("GXV_DEPTH_TEX", 1);
 #ifdef __VGX_VITA__
     g_hasS3tc = true; // (vitaGL takes DXT1 whatever its extension string says)

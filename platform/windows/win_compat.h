@@ -15,6 +15,15 @@
 #include <sys/types.h>
 #include <pthread_time.h>
 #include <unistd.h>
+#ifdef __cplusplus
+// (libstdc++'s <cstdio> / <cstdlib> / <ctime> #undef rename, ... when a later include reaches them, which
+// would hand the port the C runtime's rename - no replacing an existing file - and break NANDMove. Read
+// once here, before the macros below, their include guards keep them from undoing them.)
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#endif
 
 #ifdef __cplusplus
 extern "C" {

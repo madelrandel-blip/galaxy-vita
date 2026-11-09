@@ -8,6 +8,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <mmsystem.h>
+#include <unknwn.h>  // (IUnknown: the DXGI / Direct3D 11 probe below)
 
 #include <direct.h>
 #include <fcntl.h>
@@ -23,6 +24,32 @@
 #include "port/port.h"
 
 extern "C" void port_boot(const char*, const char*);
+
+// ANGLE picks Direct3D 11 or 9 once, when EGL first starts, and keeps it (a later ANGLE_DEFAULT_PLATFORM is not read). Its
+// Direct3D 11 renderer needs DXGI 1.2 (Windows 7: the Platform Update, KB2670838) and feature level 10_0 for OpenGL ES 3.0, so
+// this decides before anything starts: without either, ANGLE's Direct3D 9 renderer (OpenGL ES 2.0). Returns why, or nullptr.
+static const char* chooseAngleDirect3D9() {
+    if (getenv("ANGLE_DEFAULT_PLATFORM")) return nullptr;  // (set by hand: kept)
+    HMODULE dxgi = LoadLibraryA("dxgi.dll");
+    using CreateFactory1 = HRESULT(WINAPI*)(REFIID, void**);
+    const auto createFactory = dxgi ? reinterpret_cast<CreateFactory1>(GetProcAddress(dxgi, "CreateDXGIFactory1")) : nullptr;
+    static const GUID kFactory1 = {0x770aae78, 0xf26f, 0x4dba, {0xa8, 0x29, 0x25, 0x3c, 0x83, 0xd1, 0xb3, 0x87}};
+    static const GUID kFactory2 = {0x50c83a1c, 0xe072, 0x4c48, {0x87, 0xb0, 0x36, 0x30, 0xfa, 0x36, 0xa6, 0xd0}};
+    IUnknown* factory = nullptr;
+    if (!createFactory || FAILED(createFactory(kFactory1, reinterpret_cast<void**>(&factory))) || !factory) return "no DXGI 1.1";
+    IUnknown* factory2 = nullptr;
+    const bool dxgi12 = SUCCEEDED(factory->QueryInterface(kFactory2, reinterpret_cast<void**>(&factory2))) && factory2;
+    if (factory2) factory2->Release();
+    factory->Release();
+    if (!dxgi12) return "no DXGI 1.2 (Windows 7 without the Platform Update, KB2670838)";
+    HMODULE d3d11 = LoadLibraryA("d3d11.dll");
+    using CreateDevice = HRESULT(WINAPI*)(void*, int, HMODULE, UINT, const int*, UINT, UINT, void**, int*, void**);
+    const auto createDevice = d3d11 ? reinterpret_cast<CreateDevice>(GetProcAddress(d3d11, "D3D11CreateDevice")) : nullptr;
+    int level = 0;  // (D3D_DRIVER_TYPE_HARDWARE 1, D3D11_SDK_VERSION 7; no device made, only its feature level asked)
+    if (!createDevice || FAILED(createDevice(nullptr, 1, nullptr, 0, nullptr, 0, 7, nullptr, &level, nullptr))) return "no Direct3D 11 device";
+    if (level < 0xa000) return "graphics below Direct3D feature level 10_0";
+    return nullptr;
+}
 
 static std::string exeDir() {
     char path[MAX_PATH];
@@ -179,6 +206,11 @@ int main(int argc, char** argv) {
     // (the Wii's EFB is 640x456; the picture keeps that shape and is stretched to 16:9 on screen as on a TV).
     // GXV_RENDER_SIZE=WxH overrides it for a session.
     port_pc_settings_init(saves.c_str());
+    if (const char* why = chooseAngleDirect3D9()) {
+        _putenv_s("ANGLE_DEFAULT_PLATFORM", "d3d9");  // (the C runtime's copy and Windows' own: ANGLE may read either)
+        SetEnvironmentVariableA("ANGLE_DEFAULT_PLATFORM", "d3d9");
+        port_log("graphics: ANGLE on Direct3D 9 (OpenGL ES 2.0): %s", why);
+    }
     if (!getenv("GXV_RENDER_SIZE")) {
         int rw = 0, rh = 0;
         port_pc_res_size(port_pc_res_index(), &rw, &rh);

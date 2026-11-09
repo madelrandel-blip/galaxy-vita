@@ -27,6 +27,8 @@ int port_pc_msaa_max(void);       // the most this graphics card allows (1: none
 void port_pc_next_msaa(void);     // the next choice the card allows (off after the last)
 int port_pc_fsr(void);            // AMD FidelityFX Super Resolution 1 (EASU + RCAS) for the picture's upscale to the window
 void port_pc_set_fsr(int on);
+int port_pc_fullscreen(void);     // 1: fullscreen (the desktop's size), 0: a window
+void port_pc_set_fullscreen(int on);
 void port_pc_apply_start(void);   // the renderer's side of the settings, once at start-up
 
 #ifdef __cplusplus

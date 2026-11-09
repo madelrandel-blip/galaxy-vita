@@ -102,6 +102,31 @@ extern "C" void vglUniformShadowWritten(unsigned int prog, uint32_t stages) __at
 #include <memory>
 #include <unordered_set>
 #include <unordered_map>
+#if defined(_WIN32)
+// Windows: a weak reference to a DLL's function stays null (PE has no weak imports), so the GLES 3 entry points this file
+// tests for are asked of EGL instead (ANGLE gives them for any context: the callers check for an ES 3 context themselves).
+#include <EGL/egl.h>
+typedef void (*VgxPfnBlit)(GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum);
+typedef void (*VgxPfnRbMs)(GLenum, GLsizei, GLenum, GLsizei, GLsizei);
+inline bool VgxEs3() {
+    static int es3 = -1;
+    if (es3 < 0) {
+        const char* v = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        es3 = v && std::strstr(v, "OpenGL ES 3") ? 1 : 0;
+    }
+    return es3 == 1;
+}
+inline VgxPfnBlit VgxBlit() {
+    static VgxPfnBlit f = VgxEs3() ? reinterpret_cast<VgxPfnBlit>(eglGetProcAddress("glBlitFramebuffer")) : nullptr;
+    return f;
+}
+inline VgxPfnRbMs VgxRbMs() {
+    static VgxPfnRbMs f = VgxEs3() ? reinterpret_cast<VgxPfnRbMs>(eglGetProcAddress("glRenderbufferStorageMultisample")) : nullptr;
+    return f;
+}
+#define glBlitFramebuffer (VgxBlit())
+#define glRenderbufferStorageMultisample (VgxRbMs())
+#endif
 
 #ifndef GL_COMPRESSED_RGBA_S3TC_DXT1_EXT
 #define GL_COMPRESSED_RGBA_S3TC_DXT1_EXT 0x83F1
@@ -5261,8 +5286,12 @@ void SetRungFactors(int rung) {
 #ifdef __VGX_VITA__
 extern "C" GLboolean vglFramebufferMultisample(GLuint framebuffer, GLint samples) __attribute__((weak)); // (FBO_MSAA vitaGL)
 #else
+#if !defined(_WIN32)
 extern "C" void glBlitFramebuffer(GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum) __attribute__((weak));
+#endif
+#if !defined(_WIN32)
 extern "C" void glRenderbufferStorageMultisample(GLenum, GLsizei, GLenum, GLsizei, GLsizei) __attribute__((weak));
+#endif
 #endif
 int g_msaaTop = 1; // the most samples a pixel the EFB can have here (1: no multisampling rungs; MsaaProbe)
 int g_userSamples = 1; // (SetEfbMsaa, the PC's Settings) samples asked for every rung; 1: the rung's own
@@ -8843,7 +8872,9 @@ void EndFx() {
 // that unchanged. A depth plan that leaves out a load or store that matters then shows up as a different picture.
 
 #if !defined(__VGX_VITA__)
+#if !defined(_WIN32)
 extern "C" void glBlitFramebuffer(GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLint, GLbitfield, GLenum) __attribute__((weak));
+#endif
 struct DepthSim {
     bool on = false;          // modelling the depth memory in this run
     bool prevEfb = true, prevStore = true;

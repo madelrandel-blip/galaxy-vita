@@ -2,7 +2,7 @@
 //
 // Layout (PauseMenu.arc, units of the 608 x 456 layout, y up): the top bar ends at y 77, the bottom bar starts at y -123.
 // The game's two buttons sit under the pane "BackButton" (y 12): Back at +12, Quit 85 below. With the buttons at 80% and
-// Quit 75 below Back, three fit between the bars: Back 41.6, Quit -28, Settings -88. The settings screen's seven buttons
+// Quit 75 below Back, three fit between the bars: Back 41.6, Quit -28, Settings -88. The settings screen's eight buttons
 // (55%) are in two columns at x -150 and +150, rows 54, 2, -50, -102, while Back and Quit are away.
 #include "Game/Screen/ButtonPaneController.hpp"
 #include "Game/Screen/LayoutActor.hpp"
@@ -78,7 +78,7 @@ public:
     bool mLeaving = false;
 };
 
-enum { kRes, kFsr, kFxaa, kMsaa, kFps, kVsync, kBack, kOptions };
+enum { kRes, kFsr, kFxaa, kMsaa, kFps, kVsync, kFull, kBack, kOptions };
 PortMenuButton* sSettings = nullptr;
 PortMenuButton* sOpt[kOptions] = {};
 enum class Screen { Opening, Editing, Applying, Closing };
@@ -97,6 +97,7 @@ void OptionTexts() {
     sOpt[kMsaa]->SetText(text);
     sOpt[kFps]->SetText(port_pc_fps_counter() ? "FPS counter: On" : "FPS counter: Off");
     sOpt[kVsync]->SetText(port_pc_vsync() ? "VSync: On" : "VSync: Off");
+    sOpt[kFull]->SetText(port_pc_fullscreen() ? "Display: Fullscreen" : "Display: Window");
     sOpt[kBack]->SetText("Back");
 }
 
@@ -110,6 +111,7 @@ void Apply(int option) {
         break;
     case kFps: port_pc_set_fps_counter(!port_pc_fps_counter()); break;
     case kVsync: port_pc_set_vsync(!port_pc_vsync()); break;
+    case kFull: port_pc_set_fullscreen(!port_pc_fullscreen()); break;
     default: break;
     }
     OptionTexts();
@@ -120,9 +122,9 @@ void port_pc_menu_init(LayoutActor* pauseMenu) {
     PlaceButtons(pauseMenu, 32.0f, 0.8f);  // Back 41.6, Quit -28
     sSettings = new PortMenuButton(-88.0f, 0.8f);
     sSettings->initWithoutIter();
-    // (left: Resolution, FSR, FXAA, MSAA; right: FPS counter, VSync, and Back at the bottom)
-    static const f32 kCenters[kOptions] = {54.0f, 2.0f, -50.0f, -102.0f, 54.0f, 2.0f, -102.0f};
-    static const f32 kX[kOptions] = {-150.0f, -150.0f, -150.0f, -150.0f, 150.0f, 150.0f, 150.0f};
+    // (left: Resolution, FSR, FXAA, MSAA; right: FPS counter, VSync, Display, Back)
+    static const f32 kCenters[kOptions] = {54.0f, 2.0f, -50.0f, -102.0f, 54.0f, 2.0f, -50.0f, -102.0f};
+    static const f32 kX[kOptions] = {-150.0f, -150.0f, -150.0f, -150.0f, 150.0f, 150.0f, 150.0f, 150.0f};
     for (int i = 0; i < kOptions; ++i) {
         sOpt[i] = new PortMenuButton(kCenters[i], 0.55f, kX[i]);
         sOpt[i]->initWithoutIter();

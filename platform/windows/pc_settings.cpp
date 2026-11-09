@@ -25,7 +25,7 @@ const Resolution kRes[] = {
 constexpr int kResCount = sizeof kRes / sizeof kRes[0];
 constexpr int kDefaultRes = 2;  // 1080p
 
-std::atomic<int> sRes{kDefaultRes}, sFps{1}, sVsync{1}, sFxaa{0}, sMsaa{1}, sFsr{0};
+std::atomic<int> sRes{kDefaultRes}, sFps{1}, sVsync{1}, sFxaa{0}, sMsaa{1}, sFsr{0}, sFull{0};
 char sPath[1024];
 
 void Save() {
@@ -33,8 +33,8 @@ void Save() {
     FILE* f = fopen(sPath, "w");
     if (!f) { port_log("pc settings: cannot write %s", sPath); return; }
     fprintf(f, "# Super Mario Galaxy (PC) - graphics settings (also in the pause menu: Settings)\n");
-    fprintf(f, "resolution=%s\nfps_counter=%d\nvsync=%d\nfxaa=%d\nmsaa=%d\nfsr=%d\n", kRes[sRes.load()].name, sFps.load(),
-            sVsync.load(), sFxaa.load(), sMsaa.load(), sFsr.load());
+    fprintf(f, "resolution=%s\nfps_counter=%d\nvsync=%d\nfxaa=%d\nmsaa=%d\nfsr=%d\nfullscreen=%d\n", kRes[sRes.load()].name,
+            sFps.load(), sVsync.load(), sFxaa.load(), sMsaa.load(), sFsr.load(), sFull.load());
     fclose(f);
 }
 }  // namespace
@@ -63,6 +63,8 @@ extern "C" void port_pc_settings_init(const char* saveRoot) {
                 sMsaa = m >= 16 ? 16 : m >= 8 ? 8 : m >= 4 ? 4 : m >= 2 ? 2 : 1;
             } else if (!strcmp(line, "fsr")) {
                 sFsr = atoi(v) != 0;
+            } else if (!strcmp(line, "fullscreen")) {
+                sFull = atoi(v) != 0;
             }
         }
         fclose(f);
@@ -127,6 +129,11 @@ extern "C" void port_pc_next_msaa(void) {
 extern "C" int port_pc_fsr(void) { return sFsr.load(); }
 extern "C" void port_pc_set_fsr(int on) {
     sFsr = on != 0;
+    Save();
+}
+extern "C" int port_pc_fullscreen(void) { return sFull.load(); }
+extern "C" void port_pc_set_fullscreen(int on) {
+    sFull = on != 0;
     Save();
 }
 extern "C" void port_pc_apply_start(void) {

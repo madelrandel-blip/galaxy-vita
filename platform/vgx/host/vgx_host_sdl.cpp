@@ -140,9 +140,16 @@ void OpenFirstPad() {
     }
 }
 
+// The window follows the Display setting (the pause menu's Settings, F11, Alt+Enter; settings-pc.ini): fullscreen at the desktop's size.
+void SyncFullscreen() {
+    if (!g_window) return;
+    const bool want = port_pc_fullscreen() != 0;
+    const bool is = (SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN_DESKTOP) == SDL_WINDOW_FULLSCREEN_DESKTOP;
+    if (want != is) SDL_SetWindowFullscreen(g_window, want ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+}
 void ToggleFullscreen() {
-    const Uint32 flags = SDL_GetWindowFlags(g_window);
-    SDL_SetWindowFullscreen(g_window, (flags & SDL_WINDOW_FULLSCREEN_DESKTOP) ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+    port_pc_set_fullscreen(!port_pc_fullscreen());
+    SyncFullscreen();
 }
 
 void UpdatePad() {
@@ -431,6 +438,7 @@ bool Present(unsigned efb, int x, int y, int w, int h) {
         glBlitFramebuffer(x, sy0, x + w, sy1, g_viewX, dh - g_viewY, g_viewX + g_viewW, dh - g_viewY - g_viewH, GL_COLOR_BUFFER_BIT,
                           GL_LINEAR);
     }
+    SyncFullscreen();
     g_showFps = port_pc_fps_counter() != 0;  // (the pause menu's Settings, F3, settings-pc.ini)
     if (g_showFps) DrawFps(dw, dh);
     {
@@ -511,7 +519,8 @@ bool CreateContext() {
     }
     if (g_es2 && !MakeBlitProgram()) VGX_ERR("present program failed to link\n");
     std::fprintf(stderr, "[vgx-sdl] GL %s / %s\n", (const char*)glGetString(GL_VERSION), (const char*)glGetString(GL_RENDERER));
-    if (std::getenv("PETARI_FULLSCREEN")) ToggleFullscreen();
+    if (std::getenv("PETARI_FULLSCREEN")) port_pc_set_fullscreen(1);
+    SyncFullscreen();
     OpenFirstPad();
     backend::SetPresentHook(Present);
     Pump();

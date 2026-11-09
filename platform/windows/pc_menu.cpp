@@ -2,8 +2,8 @@
 //
 // Layout (PauseMenu.arc, units of the 608 x 456 layout, y up): the top bar ends at y 77, the bottom bar starts at y -123.
 // The game's two buttons sit under the pane "BackButton" (y 12): Back at +12, Quit 85 below. With the buttons at 80% and
-// Quit 75 below Back, three fit between the bars: Back 41.6, Quit -28, Settings -88. The settings screen's four buttons
-// (62%) are at 54, 2, -50, -102 while Back and Quit are away.
+// Quit 75 below Back, three fit between the bars: Back 41.6, Quit -28, Settings -88. The settings screen's seven buttons
+// (55%) are in two columns at x -150 and +150, rows 54, 2, -50, -102, while Back and Quit are away.
 #include "Game/Screen/ButtonPaneController.hpp"
 #include "Game/Screen/LayoutActor.hpp"
 #include "Game/Util/GamePadUtil.hpp"
@@ -19,8 +19,9 @@
 namespace {
 constexpr f32 kQuitStep = 75.0f;  // Quit's distance under Back (85 in the layout)
 
-void PlaceButtons(LayoutActor* actor, f32 backButtonY, f32 scale) {
+void PlaceButtons(LayoutActor* actor, f32 backButtonY, f32 scale, f32 x = 0.0f) {
     if (nw4r::lyt::Pane* p = MR::getPane(actor, "BackButton")) {
+        p->mTranslate.x = x;
         p->mTranslate.y = backButtonY;
         p->mScale.x = scale;
         p->mScale.y = scale;
@@ -31,13 +32,14 @@ void PlaceButtons(LayoutActor* actor, f32 backButtonY, f32 scale) {
 // One button: the PauseMenu layout again, showing only its Quit button, centred at `center`.
 class PortMenuButton : public LayoutActor {
 public:
-    PortMenuButton(f32 center, f32 scale) : LayoutActor("PortMenuButton", true), mCtrl(nullptr), mCenter(center), mScale(scale) {}
+    PortMenuButton(f32 center, f32 scale, f32 x = 0.0f)
+        : LayoutActor("PortMenuButton", true), mCtrl(nullptr), mCenter(center), mScale(scale), mX(x) {}
 
     virtual void init(const JMapInfoIter&) {
         initLayoutManagerWithTextBoxBufferLength("PauseMenu", 64, 1);  // (text box buffers of 64 characters, 1 animation layer)
         static const char* const kHidden[] = {"BG", "PicStagebase", "PicStagebase1", "Stars", "Counter", "LetterButton", "PositionNull", "NBackUp"};
         for (const char* name : kHidden) MR::hidePaneRecursive(this, name);
-        PlaceButtons(this, mCenter + kQuitStep * mScale, mScale);
+        PlaceButtons(this, mCenter + kQuitStep * mScale, mScale, mX);
         MR::connectToSceneLayoutOnPause(this);
         mCtrl = new ButtonPaneController(this, "NBackDown", "BoxButton2", 0, true);
         mCtrl->_22 = false;
@@ -72,11 +74,11 @@ public:
     bool Gone() const { return MR::isDead(this) || mCtrl->isHidden(); }
 
     ButtonPaneController* mCtrl;
-    f32 mCenter, mScale;
+    f32 mCenter, mScale, mX;
     bool mLeaving = false;
 };
 
-enum { kRes, kFps, kVsync, kBack, kOptions };
+enum { kRes, kFsr, kFxaa, kMsaa, kFps, kVsync, kBack, kOptions };
 PortMenuButton* sSettings = nullptr;
 PortMenuButton* sOpt[kOptions] = {};
 enum class Screen { Opening, Editing, Applying, Closing };
@@ -87,6 +89,12 @@ void OptionTexts() {
     char text[64];
     snprintf(text, sizeof text, "Resolution: %s", port_pc_res_name(port_pc_res_index()));
     sOpt[kRes]->SetText(text);
+    sOpt[kFsr]->SetText(port_pc_fsr() ? "FSR: On" : "FSR: Off");
+    sOpt[kFxaa]->SetText(port_pc_fxaa() ? "FXAA: On" : "FXAA: Off");
+    if (port_pc_msaa_max() == 1) snprintf(text, sizeof text, "MSAA: N/A");
+    else if (port_pc_msaa() <= 1) snprintf(text, sizeof text, "MSAA: Off");
+    else snprintf(text, sizeof text, "MSAA: %dx", port_pc_msaa());
+    sOpt[kMsaa]->SetText(text);
     sOpt[kFps]->SetText(port_pc_fps_counter() ? "FPS counter: On" : "FPS counter: Off");
     sOpt[kVsync]->SetText(port_pc_vsync() ? "VSync: On" : "VSync: Off");
     sOpt[kBack]->SetText("Back");
@@ -95,6 +103,11 @@ void OptionTexts() {
 void Apply(int option) {
     switch (option) {
     case kRes: port_pc_set_res_index((port_pc_res_index() + 1) % port_pc_res_count()); break;
+    case kFsr: port_pc_set_fsr(!port_pc_fsr()); break;
+    case kFxaa: port_pc_set_fxaa(!port_pc_fxaa()); break;
+    case kMsaa:
+        if (port_pc_msaa_max() > 1) port_pc_next_msaa();
+        break;
     case kFps: port_pc_set_fps_counter(!port_pc_fps_counter()); break;
     case kVsync: port_pc_set_vsync(!port_pc_vsync()); break;
     default: break;
@@ -107,9 +120,11 @@ void port_pc_menu_init(LayoutActor* pauseMenu) {
     PlaceButtons(pauseMenu, 32.0f, 0.8f);  // Back 41.6, Quit -28
     sSettings = new PortMenuButton(-88.0f, 0.8f);
     sSettings->initWithoutIter();
-    static const f32 kCenters[kOptions] = {54.0f, 2.0f, -50.0f, -102.0f};
+    // (left: Resolution, FSR, FXAA, MSAA; right: FPS counter, VSync, and Back at the bottom)
+    static const f32 kCenters[kOptions] = {54.0f, 2.0f, -50.0f, -102.0f, 54.0f, 2.0f, -102.0f};
+    static const f32 kX[kOptions] = {-150.0f, -150.0f, -150.0f, -150.0f, 150.0f, 150.0f, 150.0f};
     for (int i = 0; i < kOptions; ++i) {
-        sOpt[i] = new PortMenuButton(kCenters[i], 0.62f);
+        sOpt[i] = new PortMenuButton(kCenters[i], 0.55f, kX[i]);
         sOpt[i]->initWithoutIter();
     }
 }

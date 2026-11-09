@@ -229,6 +229,7 @@ int main(int argc, char** argv) {
         snprintf(size, sizeof size, "%dx%d", rw, rh);
         _putenv_s("GXV_RENDER_SIZE", size);
     }
+    port_pc_apply_start();  // (MSAA: asked of the renderer now, applied with its first frame)
     if (!getenv("PETARI_SHADER_CACHE")) _putenv_s("PETARI_SHADER_CACHE", (saves + "/shaders.bin").c_str());
 
     PortPadState pad{};

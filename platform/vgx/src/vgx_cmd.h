@@ -443,6 +443,10 @@ using PresentHook = bool (*)(unsigned efbFramebuffer, int x, int y, int width, i
 void SetPresentHook(PresentHook hook);
 // Render thread, between frames: a new fixed render size (GXV_RENDER_SIZE at run time).
 void SetFixedRenderSize(int w, int h);
+// The EFB multisampled with `samples` a pixel from now on (1: off), whatever the quality rung gives; the most this GL allows.
+// Render thread, between frames. MsaaMax: that most (1 where there is no multisampling: OpenGL ES 2.0 / Direct3D 9).
+void SetEfbMsaa(int samples);
+int MsaaMax();
 // The EFB target's size in pixels now (the present hook's rectangle lies inside it).
 void RenderTargetSize(int& w, int& h);
 // Automatic quality (dynamic resolution, vgx_autoq.h): a host whose present hook swaps calls this right after the

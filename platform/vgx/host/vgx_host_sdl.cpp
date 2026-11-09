@@ -384,6 +384,22 @@ void PresentEs2(unsigned efb, int x, int y, int w, int h, int dw, int dh) {
     glViewport(0, 0, dw, dh);
 }
 
+#include "vgx_host_post.inc"
+
+// FXAA / FSR (the PC Settings) or an OpenGL ES 2.0 context: the shader passes of vgx_host_post.inc. False: not done (the blit then).
+bool PresentPost(unsigned efb, int x, int y, int w, int h, int dh) {
+    const bool fxaa = port_pc_fxaa() != 0, fsr = port_pc_fsr() != 0;
+    if (!g_es2 && !fxaa && !fsr) return false;
+    GLint tex = 0;
+    glBindFramebuffer(GL_FRAMEBUFFER, efb);
+    glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &tex);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    int tw = 0, th = 0;
+    backend::RenderTargetSize(tw, th);
+    if (!tex || tw <= 0 || th <= 0) return false;
+    return post::Present(static_cast<GLuint>(tex), tw, th, x, y, w, h, g_flipY, g_viewX, dh - g_viewY - g_viewH, g_viewW, g_viewH, fxaa, fsr);
+}
+
 bool Present(unsigned efb, int x, int y, int w, int h) {
     if (efb == 0 || w <= 0 || h <= 0) { Pump(); return false; }
     int dw = 1, dh = 1;
@@ -403,7 +419,10 @@ bool Present(unsigned efb, int x, int y, int w, int h) {
     glViewport(0, 0, dw, dh);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
-    if (g_es2) {
+    if (PresentPost(efb, x, y, w, h, dh)) {
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, dw, dh);
+    } else if (g_es2) {
         PresentEs2(efb, x, y, w, h, dw, dh);
     } else {
         glBindFramebuffer(GL_READ_FRAMEBUFFER, efb);

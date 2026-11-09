@@ -5265,6 +5265,25 @@ extern "C" void glBlitFramebuffer(GLint, GLint, GLint, GLint, GLint, GLint, GLin
 extern "C" void glRenderbufferStorageMultisample(GLenum, GLsizei, GLenum, GLsizei, GLsizei) __attribute__((weak));
 #endif
 int g_msaaTop = 1; // the most samples a pixel the EFB can have here (1: no multisampling rungs; MsaaProbe)
+int g_userSamples = 1; // (SetEfbMsaa, the PC's Settings) samples asked for every rung; 1: the rung's own
+int GlMaxSamples() {
+#if defined(__VGX_VITA__)
+    return 1;
+#else
+    static int top = -1;
+    if (top < 0) {
+        top = 1;
+        const char* ver = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        if (glBlitFramebuffer && glRenderbufferStorageMultisample && ver && std::strstr(ver, "OpenGL ES 3")) {
+            while (glGetError() != GL_NO_ERROR) {}
+            GLint m = 0;
+            glGetIntegerv(0x8D57, &m); // GL_MAX_SAMPLES
+            if (glGetError() == GL_NO_ERROR && m > 1) top = m > 16 ? 16 : m;
+        }
+    }
+    return top;
+#endif
+}
 
 // What this platform allows (AutoQualityInit, before the EFB is made).
 int MsaaProbe(const char*& why) {
@@ -5349,8 +5368,12 @@ void EfbDropSamples() {
 // The EFB target with `samples` a pixel, its picture kept; its depth starts cleared (between frames: the display copy has
 // cleared it anyway). Called by CreateTarget (a new target) and ApplyRung (a change of multisampling alone).
 void EfbApplySamples(int samples) {
+    if (g_userSamples > 1 && g_efbFbo) {
+        samples = std::min(g_userSamples, GlMaxSamples());
+    } else {
     if (g_msaaTop <= 1 || !g_efbFbo) { g_efbSamples = 1; return; } // (GXV_MSAA's start-up choice stays untouched)
     samples = std::clamp(samples, 1, g_msaaTop);
+    }
 #ifdef __VGX_VITA__
     vglFramebufferMultisample(g_efbFbo, samples);
     g_efbSamples = samples;
@@ -10315,6 +10338,15 @@ void RenderTargetSize(int& w, int& h) {
     w = g_rtW;
     h = g_rtH;
 }
+void SetEfbMsaa(int samples) {
+    samples = std::clamp(samples, 1, 16);
+    if (samples == g_userSamples) return;
+    g_userSamples = samples;
+    if (!g_efbFbo) return;
+    EfbApplySamples(samples > 1 ? samples : RungSamples(g_rung));
+    std::fprintf(stderr, "[vgx] MSAA now %dx (settings)\n", g_efbSamples);
+}
+int MsaaMax() { return GlMaxSamples(); }
 void SetFixedRenderSize(int w, int h) {
     if (w <= 0 || h <= 0 || (w == g_fixedW && h == g_fixedH)) return;
     g_fixedW = w;

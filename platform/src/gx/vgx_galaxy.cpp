@@ -492,6 +492,8 @@ std::mutex sMtx;
 std::condition_variable sCv;
 // A render size asked for by the PC settings menu (w << 16 | h; 0: none), applied by the render thread before its next frame.
 std::atomic<uint32_t> sPendingRenderSize{0};
+std::atomic<int> sPendingMsaa{0};  // (port_vgx_request_msaa: samples + 1, 0: nothing pending)
+std::atomic<int> sMsaaMax{0};      // (MsaaMax, once the back end is up)
 std::vector<vgx::CmdBuf*> sFree, sJobs;
 unsigned sMaxInFlight = 1;
 // How many frames the back end may hold at once (the one it draws and the ones waiting for it; sMaxInFlight + 1 buffers exist).
@@ -638,6 +640,8 @@ void RenderMain() {
         const bool skip = sSkipWhenBehind && !cap && sJobs.size() > 1;
         lk.unlock();
         if (const uint32_t rs = sPendingRenderSize.exchange(0)) vgx::backend::SetFixedRenderSize(int(rs >> 16), int(rs & 0xFFFF));
+        if (const int ms = sPendingMsaa.exchange(0)) vgx::backend::SetEfbMsaa(ms - 1);
+        if (!sMsaaMax.load(std::memory_order_relaxed)) sMsaaMax.store(vgx::backend::MsaaMax(), std::memory_order_relaxed);
         vgx::backend::SetSkipDraws(skip);
         vgx::backend::RequestCapture(cap);
         const int64_t tExec = PORT_RUNTIME_DIAGNOSTICS && sPerfSeconds > 0 ? port_host_time_ns() : 0;
@@ -1012,6 +1016,12 @@ extern "C" void port_vgx_marker(uint32_t kind) {
 // The front end's CPU time at its last display copy (perf.cpp's slow-turn line compares it across a turn).
 extern "C" int64_t port_vgx_player_cpu_us(void) { return sPlCpuUs.load(std::memory_order_relaxed); }
 extern "C" int port_vgx_active(void) { return sActive.load(std::memory_order_relaxed) ? 1 : 0; }
+extern "C" void port_vgx_request_msaa(int samples) {
+    if (samples < 1) samples = 1;
+    sPendingMsaa.store(samples + 1);
+    sCv.notify_all();
+}
+extern "C" int port_vgx_msaa_max(void) { return sMsaaMax.load(std::memory_order_relaxed); }
 extern "C" void port_vgx_request_render_size(int w, int h) {
     if (w <= 0 || h <= 0 || w > 0xFFFF || h > 0xFFFF) return;
     sPendingRenderSize.store((uint32_t(w) << 16) | uint32_t(h));
@@ -1538,6 +1548,8 @@ extern "C" void port_gx_use_recorder_backend(void);
 extern "C" void port_gx_select_backend(void) { port_gx_use_recorder_backend(); }
 extern "C" int port_vgx_active(void) { return 0; }
 extern "C" void port_vgx_request_render_size(int, int) {}
+extern "C" void port_vgx_request_msaa(int) {}
+extern "C" int port_vgx_msaa_max(void) { return 1; }
 extern "C" size_t port_vgx_consume(const uint8_t*, size_t len) { return len; }
 extern "C" int port_vgx_player(void) { return 0; }
 extern "C" int port_vgx_seg_idle(void) { return 0; }

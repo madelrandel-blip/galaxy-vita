@@ -1296,8 +1296,7 @@ inline void SetDepthRange(float n, float f) {
         uint32_t bn, bf;
         std::memcpy(&bn, &n, 4);
         std::memcpy(&bf, &f, 4);
-        if (zlog && seen.size() < 64 && seen.insert((uint64_t(bn) << 32) | bf).second) std::fprintf(stderr, "[zrange] %.9g .. %.9g
-", n, f);
+        if (zlog && seen.size() < 64 && seen.insert((uint64_t(bn) << 32) | bf).second) std::fprintf(stderr, "[zrange] %.9g .. %.9g\n", n, f);
     }
 #endif
     G(glDepthRangef(n, f));

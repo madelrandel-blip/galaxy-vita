@@ -62,14 +62,18 @@ void StarPointerController::storeDataFromCallback(const f32* pProjectionParams, 
                 origin.set(o[0], o[1], o[2]);
                 dir.set(d[0], d[1], d[2]);
             } else {
+                // The camera ray through the cursor, from the current camera (the projection and viewport saved with the
+                // draw-sync token can be another pass's, which left the target stuck at one place while standing).
                 origin = MR::getCamPos();
-                dir = mWorldPos - origin;  // mWorldPos lies on the far plane
+                TVec3f through;
+                MR::calcWorldPositionFromScreen(&through, mInfo.mPos, -1.0f);
+                dir = through - origin;
                 MR::normalizeOrZero(&dir);
             }
             TVec3f hit;
             if (!dir.isZero() && MR::getFirstPolyOnLineToMap(&hit, nullptr, origin, dir * 30000.0f)) {
                 mWorldPos = hit;
-            } else if (vrRay) {
+            } else if (!dir.isZero()) {
                 mWorldPos = origin + dir * 30000.0f;
             }
             // The VR laser reaches as far as star bits fly.

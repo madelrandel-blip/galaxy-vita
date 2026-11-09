@@ -465,10 +465,12 @@ bool CreateContext() {
                                         {kD3D9, 2, "OpenGL ES 2.0 on Direct3D 9"}};
     const char* forced = std::getenv("ANGLE_DEFAULT_PLATFORM");
     const bool onlyD3D9 = forced && !std::strcmp(forced, "d3d9");
+    const bool onlyEs2 = std::getenv("PETARI_GLES2") != nullptr;  // (diagnosis: OpenGL ES 2.0 on Direct3D 11)
     std::string failures;
     bool ok = false;
     for (const Attempt& a : kAttempts) {
         if (onlyD3D9 && a.platform != kD3D9) continue;
+        if (onlyEs2 && a.major != 2) continue;
         std::string why;
         if (TryEgl(hwnd, a.platform, a.major, why)) {
             g_es2 = a.major < 3;

@@ -1289,6 +1289,17 @@ inline void SetViewport(int x, int y, int w, int h) {
 }
 inline void SetDepthRange(float n, float f) {
     if (S.zn == n && S.zf == f) return;
+#if !defined(__VGX_VITA__)
+    {   // (GXV_ZRANGE_LOG=1: each new depth range once, to stderr)
+        static const bool zlog = EnvInt("GXV_ZRANGE_LOG", 0) != 0;
+        static std::unordered_set<uint64_t> seen;
+        uint32_t bn, bf;
+        std::memcpy(&bn, &n, 4);
+        std::memcpy(&bf, &f, 4);
+        if (zlog && seen.size() < 64 && seen.insert((uint64_t(bn) << 32) | bf).second) std::fprintf(stderr, "[zrange] %.9g .. %.9g
+", n, f);
+    }
+#endif
     G(glDepthRangef(n, f));
     ++C.stateCalls;
     S.zn = n; S.zf = f;

@@ -10281,8 +10281,7 @@ void SetFixedRenderSize(int w, int h) {
     const int keep = g_rung, other = keep == autoq::kToday ? autoq::kToday - 1 : autoq::kToday;
     ApplyRung(other, "render size setting");
     ApplyRung(keep, "render size setting");
-    std::fprintf(stderr, "[vgx] render size now %dx%d (settings)
-", g_rtW, g_rtH);
+    std::fprintf(stderr, "[vgx] render size now %dx%d (settings)\n", g_rtW, g_rtH);
 }
 #if VGX_COLDTRACE
 static_assert(VGX_COLDTRACE_DETAIL_VERSION==3);

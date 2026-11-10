@@ -68,7 +68,12 @@ const char* port_pc_language(void);
 void port_pc_set_language(const char* name);
 int port_pc_export_saves(void);  // a .zip of the saves (file dialog): 1 done, 0 cancelled, -1 failed
 int port_pc_import_saves(void);  // the same back (the current saves kept as a backup folder); 1: restart to load them
-void port_pc_restart(void);      // starts the game again (same command line) and ends this one
+void port_pc_restart(void);
+// Skins: folders under <galaxy.exe's folder>/skins, each with files/... (converted game files that replace the game's own, e.g.
+// files/ObjectData/Mario.arc). "" is the game's own look. Applies when the game starts again.
+const char* port_pc_skin(void);
+void port_pc_next_skin(void);
+const char* port_pc_skin_files(void);  // the chosen skin's files folder, "" for none      // starts the game again (same command line) and ends this one
 
 #ifdef __cplusplus
 }

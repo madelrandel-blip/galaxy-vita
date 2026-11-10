@@ -702,6 +702,10 @@ static void presetSizesFromListings(const std::vector<std::string>& dirPath) {
 }
 #endif
 
+#if defined(_WIN32)
+extern "C" const char* port_pc_skin_files(void);  // platform/windows/pc_settings.cpp: "<skins>/<name>/files", "" for none
+#endif
+
 static bool loadFst() {
     PortHostAllocScope scope;
     std::vector<u8> data = readFst(sDataRoot);
@@ -748,6 +752,23 @@ static bool loadFst() {
         }
     }
     port_log("dvd: fst loaded, %u entries, root %s", count, sDataRoot.c_str());
+#if defined(_WIN32)
+    // Settings > Game > Skin: a file the skin's folder has (same path under files/, converted like the game's) is read instead.
+    if (const char* skin = port_pc_skin_files(); skin && *skin) {
+        const std::string base = sDataRoot + "/files/";
+        unsigned replaced = 0;
+        for (FstEntry& fe : sFst) {
+            if (fe.isDir || fe.hostPath.compare(0, base.size(), base) != 0) continue;
+            const std::string alt = std::string(skin) + "/" + fe.hostPath.substr(base.size());
+            struct stat st;
+            if (stat(alt.c_str(), &st) == 0 && st.st_size > 0) {
+                fe.hostPath = alt;
+                ++replaced;
+            }
+        }
+        port_log("dvd: skin %s: %u files", skin, replaced);
+    }
+#endif
 #if defined(__vita__)
     assignBuckets(dirPath);
     const u32 moved = moveToBuckets(dirPath);

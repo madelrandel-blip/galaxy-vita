@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include <atomic>
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -63,6 +64,7 @@ std::atomic<int> sKey[PORT_PC_ACT_COUNT], sPad[PORT_PC_ACT_COUNT];
 std::atomic<int> sGyro{0}, sFpsLimit{60};
 std::atomic<int> sCapture{-1}, sCaptureResult{0};
 char sLanguage[32];
+char sSkin[64];
 
 int ClampVol(int which, int v) {
     if (v < 0) v = 0;
@@ -78,6 +80,7 @@ void Save() {
     fprintf(f, "resolution=%s\nfps_counter=%d\nvsync=%d\nfxaa=%d\nmsaa=%d\nfsr=%d\nfullscreen=%d\n", kRes[sRes.load()].name,
             sFps.load(), sVsync.load(), sFxaa.load(), sMsaa.load(), sFsr.load(), sFull.load());
     for (int i = 0; i < PORT_PC_VOL_COUNT; ++i) fprintf(f, "%s=%d\n", kVolKey[i], sVol[i].load());
+    fprintf(f, "skin=%s\n", sSkin);
     fprintf(f, "fps_limit=%d\ngyro=%d\nlanguage=%s\n", sFpsLimit.load(), sGyro.load(), sLanguage);
     fprintf(f, "# controls: bind_<action>=<keyboard>,<controller> (SDL scancode or 1000 + mouse button; SDL controller button, 100 LT, 101 RT; -1 none)\n");
     for (int i = 0; i < PORT_PC_ACT_COUNT; ++i) fprintf(f, "bind_%s=%d,%d\n", kActions[i].id, sKey[i].load(), sPad[i].load());
@@ -120,6 +123,8 @@ extern "C" void port_pc_settings_init(const char* saveRoot) {
                 sFpsLimit = atoi(v) == 30 ? 30 : 60;
             } else if (!strcmp(line, "gyro")) {
                 sGyro = atoi(v) != 0;
+            } else if (!strcmp(line, "skin")) {
+                snprintf(sSkin, sizeof sSkin, "%s", v);
             } else if (!strcmp(line, "language")) {
                 snprintf(sLanguage, sizeof sLanguage, "%s", v);
             } else if (!strncmp(line, "volume_", 7)) {
@@ -471,4 +476,51 @@ extern "C" int port_pc_fps_limit(void) { return sFpsLimit.load(std::memory_order
 extern "C" void port_pc_set_fps_limit(int fps) {
     sFpsLimit = fps == 30 ? 30 : 60;
     Save();
+}
+
+// ---- skins
+namespace {
+std::string SkinsDir() {
+    wchar_t exe[MAX_PATH];
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    std::wstring dir = exe;
+    dir = dir.substr(0, dir.find_last_of(L"\\/"));
+    return Narrow(dir) + "/skins";
+}
+// The skins there (folders with a files/ folder), sorted.
+std::vector<std::string> SkinNames() {
+    std::vector<std::string> names;
+    WIN32_FIND_DATAW fd;
+    const std::wstring dir = Wide(SkinsDir());
+    HANDLE h = FindFirstFileW((dir + L"/*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return names;
+    do {
+        const std::wstring n = fd.cFileName;
+        if (n == L"." || n == L".." || !(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        if (GetFileAttributesW((dir + L"/" + n + L"/files").c_str()) & FILE_ATTRIBUTE_DIRECTORY) {
+            if (GetFileAttributesW((dir + L"/" + n + L"/files").c_str()) != INVALID_FILE_ATTRIBUTES) names.push_back(Narrow(n));
+        }
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    std::sort(names.begin(), names.end());
+    return names;
+}
+std::string sSkinFiles;
+}  // namespace
+
+extern "C" const char* port_pc_skin(void) { return sSkin; }
+extern "C" void port_pc_next_skin(void) {
+    // "" (the game's own), then each folder in order, then "" again.
+    const std::vector<std::string> names = SkinNames();
+    size_t at = 0;  // (index into "" + names)
+    for (size_t i = 0; i < names.size(); ++i)
+        if (names[i] == sSkin) at = i + 1;
+    at = (at + 1) % (names.size() + 1);
+    snprintf(sSkin, sizeof sSkin, "%s", at ? names[at - 1].c_str() : "");
+    Save();
+}
+extern "C" const char* port_pc_skin_files(void) {
+    if (!sSkin[0]) return "";
+    if (sSkinFiles.empty()) sSkinFiles = SkinsDir() + "/" + sSkin + "/files";
+    return sSkinFiles.c_str();
 }

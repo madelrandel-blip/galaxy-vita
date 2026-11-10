@@ -47,6 +47,7 @@ public:
         static const char* const kHidden[] = {"BG", "PicStagebase", "PicStagebase1", "Stars", "Counter", "LetterButton", "PositionNull", "NBackUp"};
         for (const char* name : kHidden) MR::hidePaneRecursive(this, name);
         PlaceButtons(this, mCenter + kQuitStep * mScale, mScale, mX);
+        if (nw4r::lyt::Pane* p = MR::getPane(this, "BackButton")) KeepSizes(p);
         MR::connectToSceneLayoutOnPause(this);
         mCtrl = new ButtonPaneController(this, "NBackDown", "BoxButton2", 0, true);
         mCtrl->_22 = false;
@@ -68,11 +69,16 @@ public:
         wide[i] = 0;
         MR::setTextBoxMessageRecursive(this, "NBackDown", wide);
     }
-    void Place(f32 x, f32 center, f32 scale, f32 scaleX) {
+    // round: every part of the button no wider than it is tall (the frame's ends stay round, as a circle), else its own size.
+    void Place(f32 x, f32 center, f32 scale, bool round) {
         mX = x;
         mCenter = center;
         mScale = scale;
-        PlaceButtons(this, mCenter + kQuitStep * mScale, mScale, mX, scaleX);
+        PlaceButtons(this, mCenter + kQuitStep * mScale, mScale, mX);
+        for (int i = 0; i < mKept; ++i) {
+            mPanes[i]->mSize.width = round && mSizes[i].width > mSizes[i].height ? mSizes[i].height : mSizes[i].width;
+            mPanes[i]->mSize.height = mSizes[i].height;
+        }
     }
     void Show() {
         mLeaving = false;
@@ -89,6 +95,22 @@ public:
     ButtonPaneController* mCtrl;
     f32 mCenter, mScale, mX;
     bool mLeaving = false;
+
+private:
+    void KeepSizes(nw4r::lyt::Pane* pane) {
+        for (nw4r::lyt::PaneList::Iterator it = pane->GetChildList().GetBeginIter(); it != pane->GetChildList().GetEndIter(); ++it) {
+            if (mKept < kMaxPanes) {
+                mPanes[mKept] = &*it;
+                mSizes[mKept] = it->mSize;
+                ++mKept;
+            }
+            KeepSizes(&*it);
+        }
+    }
+    static constexpr int kMaxPanes = 32;
+    nw4r::lyt::Pane* mPanes[kMaxPanes];
+    nw4r::lyt::Size mSizes[kMaxPanes];
+    int mKept = 0;
 };
 
 // ---- pages
@@ -104,14 +126,14 @@ enum Id {
     // controls
     kBindFirst, kBindLast = kBindFirst + PORT_PC_ACT_COUNT - 1, kGyro, kResetBinds, kNextPage, kPrevPage,
     // game
-    kLanguage, kRestart, kExport, kImport,
+    kLanguage, kSkin, kRestart, kExport, kImport,
     // every page but the first
     kToMain,
 };
 struct Item {
     int id;
     f32 x, y, scale;
-    f32 scaleX = 0.0f;  // (0: the same as scale; the round - / + buttons are narrower)
+    bool round = false;  // (the - / + buttons: a circle)
 };
 constexpr f32 kL = -150.0f, kR = 150.0f, kS = 0.55f;
 const Item kMainItems[] = {{kGoGraphics, kL, 54, kS}, {kGoAudio, kL, 2, kS}, {kGoControls, kR, 54, kS}, {kGoGame, kR, 2, kS},
@@ -121,8 +143,9 @@ constexpr f32 kG = 0.5f, kGx = 195.0f;
 const Item kGraphicsItems[] = {{kRes, -kGx, 40, kG},  {kFsr, 0, 40, kG},       {kFxaa, kGx, 40, kG},
                                {kMsaa, -kGx, -20, kG}, {kFps, 0, -20, kG},      {kVsync, kGx, -20, kG},
                                {kFull, -kGx, -80, kG}, {kFpsLimit, 0, -80, kG}, {kToMain, kGx, -80, kG}};
-// Audio: each value with a round arrow button against its left and right end (the value is 140 wide at 55 %).
-constexpr f32 kRound = 0.5f, kRoundX = 0.13f, kSide = 88.0f;
+// Audio: each value with a round - / + button against its left and right end (the value is 140 wide at 55 %).
+constexpr f32 kRound = 0.5f, kSide = 86.0f;
+constexpr bool kRoundX = true;
 const Item kAudioItems[] = {{kVolMaster, 0, 54, kS}, {kVolMasterDown, -kSide, 54, kRound, kRoundX}, {kVolMasterUp, kSide, 54, kRound, kRoundX},
                             {kVolMusic, 0, 2, kS},   {kVolMusicDown, -kSide, 2, kRound, kRoundX},   {kVolMusicUp, kSide, 2, kRound, kRoundX},
                             {kVolSfx, 0, -50, kS},   {kVolSfxDown, -kSide, -50, kRound, kRoundX},   {kVolSfxUp, kSide, -50, kRound, kRoundX},
@@ -135,8 +158,8 @@ const Item kControls2Items[] = {{kBindFirst + PORT_PC_ACT_MINUS, kL, 54, kS}, {k
                                 {kBindFirst + PORT_PC_ACT_TWO, kL, -50, kS},  {kGyro, kL, -102, kS},
                                 {kResetBinds, kR, 54, kS},                    {kPrevPage, kR, -50, kS},
                                 {kToMain, kR, -102, kS}};
-const Item kGameItems[] = {{kLanguage, kL, 54, kS}, {kRestart, kL, 2, kS}, {kExport, kR, 54, kS}, {kImport, kR, 2, kS},
-                           {kToMain, 0, -76, kS}};
+const Item kGameItems[] = {{kLanguage, kL, 54, kS}, {kSkin, kL, 2, kS},   {kRestart, kL, -50, kS},
+                           {kExport, kR, 54, kS},   {kImport, kR, 2, kS}, {kToMain, kR, -50, kS}};
 
 struct PageItems {
     const Item* items;
@@ -166,6 +189,8 @@ int sChosen = -1;  // the pool slot
 Page sNextPage = Page::Main;
 char sNote[kPool][48];  // a one-time message on a button (until the page is shown again)
 char sLanguageAtStart[32];
+char sSkinAtStart[64];
+bool sStartKept = false;
 
 // "us_spanish" -> "Us Spanish"
 void LanguageLabel(const char* name, char* out, int size) {
@@ -206,8 +231,8 @@ void TextOf(int id, char* text, int size) {
     case kVolMaster: snprintf(text, size, "Master: %d%%", port_pc_volume(PORT_PC_VOL_MASTER)); return;
     case kVolMusic: snprintf(text, size, "Music: %d%%", port_pc_volume(PORT_PC_VOL_MUSIC)); return;
     case kVolSfx: snprintf(text, size, "Effects: %d%%", port_pc_volume(PORT_PC_VOL_SFX)); return;
-    case kVolMasterDown: case kVolMusicDown: case kVolSfxDown: snprintf(text, size, "<"); return;
-    case kVolMasterUp: case kVolMusicUp: case kVolSfxUp: snprintf(text, size, ">"); return;
+    case kVolMasterDown: case kVolMusicDown: case kVolSfxDown: snprintf(text, size, "-"); return;
+    case kVolMasterUp: case kVolMusicUp: case kVolSfxUp: snprintf(text, size, "+"); return;
     case kFpsLimit: snprintf(text, size, "FPS: %d", port_pc_fps_limit()); return;
     case kGyro: snprintf(text, size, port_pc_gyro() ? "Gyroscope: On" : "Gyroscope: Off"); return;
     case kResetBinds: snprintf(text, size, "Reset controls"); return;
@@ -219,8 +244,10 @@ void TextOf(int id, char* text, int size) {
         snprintf(text, size, "Language: %s", label);
         return;
     }
+    case kSkin: snprintf(text, size, "Skin: %s", port_pc_skin()[0] ? port_pc_skin() : "Mario"); return;
     case kRestart:
-        snprintf(text, size, strcmp(CurrentLanguage(), sLanguageAtStart) ? "Restart to apply" : "Restart game");
+        snprintf(text, size, strcmp(CurrentLanguage(), sLanguageAtStart) || strcmp(port_pc_skin(), sSkinAtStart) ? "Restart to apply"
+                                                                                                                 : "Restart game");
         return;
     case kExport: snprintf(text, size, "Export saves (.zip)"); return;
     case kImport: snprintf(text, size, "Import saves (.zip)"); return;
@@ -254,7 +281,7 @@ void ShowPage(Page p) {
     sPage = p;
     const PageItems page = ItemsOf(p);
     for (int i = 0; i < kPool; ++i) sNote[i][0] = 0;
-    for (int i = 0; i < page.count; ++i) sPool[i]->Place(page.items[i].x, page.items[i].y, page.items[i].scale, page.items[i].scaleX);
+    for (int i = 0; i < page.count; ++i) sPool[i]->Place(page.items[i].x, page.items[i].y, page.items[i].scale, page.items[i].round);
     Texts();
     for (int i = 0; i < page.count; ++i) sPool[i]->Show();
 }
@@ -319,6 +346,7 @@ Page Activate(int slot, bool& capture, bool& close) {
     case kGyro: port_pc_set_gyro(!port_pc_gyro()); break;
     case kResetBinds: port_pc_reset_binds(); break;
     case kLanguage: NextLanguage(); break;
+    case kSkin: port_pc_next_skin(); break;
     case kRestart: port_pc_restart(); break;
     case kExport: {
         const int r = port_pc_export_saves();
@@ -354,7 +382,11 @@ void port_pc_menu_init(LayoutActor* pauseMenu) {
 
 void port_pc_menu_appear() {
     if (!sSettings) return;
-    if (!sLanguageAtStart[0]) snprintf(sLanguageAtStart, sizeof sLanguageAtStart, "%s", CurrentLanguage());
+    if (!sStartKept) {  // (what the game started with: a change shows "Restart to apply")
+        sStartKept = true;
+        snprintf(sLanguageAtStart, sizeof sLanguageAtStart, "%s", CurrentLanguage());
+        snprintf(sSkinAtStart, sizeof sSkinAtStart, "%s", port_pc_skin());
+    }
     sSettings->SetText("Settings");
     sSettings->Show();
 }

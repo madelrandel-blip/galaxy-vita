@@ -163,10 +163,18 @@ GameScene::~GameScene() {
     MR::onStarPointerSceneOut();
 }
 
+#if defined(TARGET_PC) && defined(_WIN32)
+extern "C" int port_pc_skin_look(void);  // platform/windows/pc_settings.cpp: the skin's skin.ini look= (1 luigi, 0 mario, -1 the save's)
+#endif
+
 void GameScene::init() {
     SceneFunction::createHioBasicNode(this);
     SceneFunction::startStageFileLoad();
-    MR::requestChangeArchivePlayer(MR::isPlayerLuigi() == false);
+    bool looksMario = MR::isPlayerLuigi() == false;
+#if defined(TARGET_PC) && defined(_WIN32)
+    if (port_pc_skin_look() >= 0) looksMario = port_pc_skin_look() == 0;  // (the skin's look: Luigi's models and suits)
+#endif
+    MR::requestChangeArchivePlayer(looksMario);
     initNerve(GET_NERVE(GameScene, GameSceneScenarioOpeningCamera));
     SceneFunction::initForNameObj();
     SceneFunction::initForLiveActor();

@@ -407,11 +407,18 @@ void GameSystemSceneController::exeDestroyScene() {
     }
 }
 
+#if defined(TARGET_PC) && defined(_WIN32)
+extern "C" int port_pc_skin_look(void);  // platform/windows/pc_settings.cpp: the skin's skin.ini look= (1 luigi, 0 mario, -1 the save's)
+#endif
+
 void GameSystemSceneController::exeChangeWaveBank() {
     if (mSpine->mStep == 0) {
         mIntermissionScene->setCurrentSceneControllerState("[change Wave Data]");
 
         bool isPlayerLuigi = GameSystemFunction::isCreatedGameDataHolder() ? MR::isPlayerLuigi() : false;
+#if defined(TARGET_PC) && defined(_WIN32)
+        if (port_pc_skin_look() >= 0) isPlayerLuigi = port_pc_skin_look() != 0;  // (the skin's voice)
+#endif
 
         ::getAudioSystemWrapper()->loadStageWaveData(mNextSceneControlInfo.mScene, mNextSceneControlInfo.mStage, isPlayerLuigi);
     }

@@ -114,6 +114,17 @@ void MarioActor_DUMMY() {
 }
 
 bool gIsLuigi;
+#if defined(TARGET_PC) && defined(_WIN32)
+extern "C" int port_pc_skin_look(void);  // platform/windows/pc_settings.cpp: the skin's skin.ini look= (1 luigi, 0 mario, -1 the save's)
+#endif
+// The player's look (models, animations, face, power-up suits, voice): the save's, unless the skin chooses one (Settings > Game > Skin).
+static bool playerLooksLuigi() {
+#if defined(TARGET_PC) && defined(_WIN32)
+    const int look = port_pc_skin_look();
+    if (look >= 0) return look != 0;
+#endif
+    return MR::isPlayerLuigi();
+}
 static f32 BASE_ROTATION = 0.0f;
 
 MarioActor::MarioActor(const char* pName) : LiveActor(pName), _1B0(0xFFFFFFFF) {
@@ -335,10 +346,7 @@ struct DUMMY {
 
 void MarioActor::init2(const TVec3f& rA, const TVec3f& rB, s32 initialAnimation) {
     _8C = 1;
-    gIsLuigi = false;
-    if (MR::isPlayerLuigi()) {
-        gIsLuigi = true;
-    }
+    gIsLuigi = playerLooksLuigi();
 
     mPosition.set(rA);
     mRotation.set(rB);
@@ -357,7 +365,7 @@ void MarioActor::init2(const TVec3f& rA, const TVec3f& rB, s32 initialAnimation)
     mMarioEffect = new MarioEffect(this);
     _214 = new CollisionShadow(100.0f, 40.0f);
     mConst = new MarioConst();
-    if (gIsLuigi) {
+    if (MR::isPlayerLuigi()) {  // (the save's character: a skin only changes the look)
         mConst->changeTable(1);
     }
 
@@ -1519,7 +1527,7 @@ void MarioActor::decLife(u16 amt) {
     }
 
     _388 = 0;
-    if (gIsLuigi) {
+    if (MR::isPlayerLuigi()) {  // (the save's character: a skin only changes the look)
         if (mMaxHealth == 3) {
             return;
         }

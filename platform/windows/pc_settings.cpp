@@ -65,6 +65,7 @@ std::atomic<int> sGyro{0}, sFpsLimit{60};
 std::atomic<int> sCapture{-1}, sCaptureResult{0};
 char sLanguage[32];
 char sSkin[64];
+char sSkinStart[64];  // (the skin the game started with)
 
 int ClampVol(int which, int v) {
     if (v < 0) v = 0;
@@ -144,6 +145,7 @@ extern "C" void port_pc_settings_init(const char* saveRoot) {
     } else {
         Save();  // (a fresh file with the defaults, to edit by hand if wanted)
     }
+    snprintf(sSkinStart, sizeof sSkinStart, "%s", sSkin);
     // (environment variables override the file for this session, unsaved)
     if (const char* e = getenv("PETARI_FPS")) sFps = atoi(e) != 0;
     if (const char* e = getenv("PETARI_VSYNC")) sVsync = atoi(e) != 0;
@@ -497,9 +499,10 @@ std::vector<std::string> SkinNames() {
     do {
         const std::wstring n = fd.cFileName;
         if (n == L"." || n == L".." || !(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
-        if (GetFileAttributesW((dir + L"/" + n + L"/files").c_str()) & FILE_ATTRIBUTE_DIRECTORY) {
-            if (GetFileAttributesW((dir + L"/" + n + L"/files").c_str()) != INVALID_FILE_ATTRIBUTES) names.push_back(Narrow(n));
-        }
+        const DWORD files = GetFileAttributesW((dir + L"/" + n + L"/files").c_str());
+        const DWORD ini = GetFileAttributesW((dir + L"/" + n + L"/skin.ini").c_str());
+        if ((files != INVALID_FILE_ATTRIBUTES && (files & FILE_ATTRIBUTE_DIRECTORY)) || ini != INVALID_FILE_ATTRIBUTES)
+            names.push_back(Narrow(n));
     } while (FindNextFileW(h, &fd));
     FindClose(h);
     std::sort(names.begin(), names.end());
@@ -520,7 +523,27 @@ extern "C" void port_pc_next_skin(void) {
     Save();
 }
 extern "C" const char* port_pc_skin_files(void) {
-    if (!sSkin[0]) return "";
-    if (sSkinFiles.empty()) sSkinFiles = SkinsDir() + "/" + sSkin + "/files";
+    if (!sSkinStart[0]) return "";
+    if (sSkinFiles.empty()) sSkinFiles = SkinsDir() + "/" + sSkinStart + "/files";
     return sSkinFiles.c_str();
+}
+// skins/<name>/skin.ini: look=luigi uses Luigi's own models, animations, face, power-up suits and voice; look=mario Mario's.
+// The skin the game started with (a change applies at the next start).
+extern "C" int port_pc_skin_look(void) {
+    static int look = [] {
+        if (!sSkinStart[0]) return -1;
+        int v = -1;
+        if (FILE* f = _wfopen(Wide(SkinsDir() + "/" + sSkinStart + "/skin.ini").c_str(), L"r")) {
+            char line[128];
+            while (fgets(line, sizeof line, f)) {
+                line[strcspn(line, "\r\n")] = 0;
+                if (!strcmp(line, "look=luigi")) v = 1;
+                if (!strcmp(line, "look=mario")) v = 0;
+            }
+            fclose(f);
+        }
+        port_log("skin: %s, look %s", sSkinStart, v == 1 ? "luigi" : v == 0 ? "mario" : "of the save");
+        return v;
+    }();
+    return look;
 }

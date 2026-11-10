@@ -150,7 +150,7 @@ enum Id {
     // main
     kGoGraphics, kGoAudio, kGoControls, kGoGame, kClose,
     // graphics
-    kRes, kFsr, kFxaa, kMsaa, kFps, kVsync, kFull, kFpsLimit,
+    kRes, kResDown, kResUp, kFsr, kFxaa, kMsaa, kMsaaDown, kMsaaUp, kFps, kVsync, kFull, kFpsLimit,
     // audio (value, minus, plus for each)
     kVolMaster, kVolMasterDown, kVolMasterUp, kVolMusic, kVolMusicDown, kVolMusicUp, kVolSfx, kVolSfxDown, kVolSfxUp,
     // controls
@@ -170,9 +170,13 @@ const Item kMainItems[] = {{kGoGraphics, kL, 54, kS}, {kGoAudio, kL, 2, kS}, {kG
                            {kClose, 0, -76, kS}};
 // Graphics: three columns of three (x -195, 0, 195; rows 40, -20, -80) at 50 %.
 constexpr f32 kG = 0.5f, kGx = 195.0f;
-const Item kGraphicsItems[] = {{kRes, -kGx, 40, kG},  {kFsr, 0, 40, kG},       {kFxaa, kGx, 40, kG},
-                               {kMsaa, -kGx, -20, kG}, {kFps, 0, -20, kG},      {kVsync, kGx, -20, kG},
-                               {kFull, -kGx, -80, kG}, {kFpsLimit, 0, -80, kG}, {kToMain, kGx, -80, kG}};
+constexpr f32 kGSide = 87.0f;  // (the round buttons' distance from a 50 % button's centre: Audio's gap)
+const Item kGraphicsItems[] = {{kRes, -kGx, 54, kG},  {kResDown, -kGx - kGSide, 54, 0.6f, 1.0f},  {kResUp, -kGx + kGSide, 54, 0.6f, 1.0f},
+                               {kFsr, 0, 54, kG},     {kFxaa, kGx, 54, kG},
+                               {kMsaa, -kGx, 2, kG},  {kMsaaDown, -kGx - kGSide, 2, 0.6f, 1.0f}, {kMsaaUp, -kGx + kGSide, 2, 0.6f, 1.0f},
+                               {kFps, 0, 2, kG},      {kVsync, kGx, 2, kG},
+                               {kFull, -kGx, -50, kG}, {kFpsLimit, 0, -50, kG},
+                               {kToMain, 0, -102, kS}};
 // Audio: each value with a small - / + button against its left and right end (the value is 140 wide at 55 %).
 constexpr f32 kRound = 0.6f, kRoundX = 1.0f, kSide = 93.0f;  // (kRoundX > 0: a round button)
 const Item kAudioItems[] = {{kVolMaster, 0, 54, kS}, {kVolMasterDown, -kSide, 54, kRound, kRoundX}, {kVolMasterUp, kSide, 54, kRound, kRoundX},
@@ -209,17 +213,18 @@ PageItems ItemsOf(Page p) {
 }
 
 constexpr int kPool = 10;
+constexpr int kItemsMax = 16;  // (pill and round buttons of a page together)
 PortMenuButton* sSettings = nullptr;
 PortMenuButton* sPool[kPool] = {};
 constexpr int kRoundPool = 6;
 PortMenuButton* sRoundPool[kRoundPool] = {};
-PortMenuButton* sSlot[kPool] = {};  // the page's item i -> its button (set by ShowPage)
+PortMenuButton* sSlot[kItemsMax] = {};  // the page's item i -> its button (set by ShowPage)
 Page sPage = Page::Main;
 enum class Screen { Opening, Editing, Applying, Capturing, Switching, Closing };
 Screen sScreen = Screen::Opening;
 int sChosen = -1;  // the pool slot
 Page sNextPage = Page::Main;
-char sNote[kPool][48];  // a one-time message on a button (until the page is shown again)
+char sNote[kItemsMax][48];  // a one-time message on a button (until the page is shown again)
 char sLanguageAtStart[32];
 char sSkinAtStart[64];
 bool sStartKept = false;
@@ -252,6 +257,8 @@ void TextOf(int id, char* text, int size) {
     case kRes: snprintf(text, size, "Resolution: %s", port_pc_res_name(port_pc_res_index())); return;
     case kFsr: snprintf(text, size, port_pc_fsr() ? "FSR: On" : "FSR: Off"); return;
     case kFxaa: snprintf(text, size, port_pc_fxaa() ? "FXAA: On" : "FXAA: Off"); return;
+    case kResDown: case kMsaaDown: snprintf(text, size, "-"); return;
+    case kResUp: case kMsaaUp: snprintf(text, size, "+"); return;
     case kMsaa:
         if (port_pc_msaa_max() == 1) snprintf(text, size, "MSAA: N/A");
         else if (port_pc_msaa() <= 1) snprintf(text, size, "MSAA: Off");
@@ -312,7 +319,7 @@ void Texts() {
 void ShowPage(Page p) {
     sPage = p;
     const PageItems page = ItemsOf(p);
-    for (int i = 0; i < kPool; ++i) sNote[i][0] = 0;
+    for (int i = 0; i < kItemsMax; ++i) sNote[i][0] = 0;
     int pill = 0, round = 0;
     for (int i = 0; i < page.count; ++i) {
         sSlot[i] = page.items[i].scaleX > 0.0f ? sRoundPool[round++] : sPool[pill++];
@@ -369,6 +376,21 @@ Page Activate(int slot, bool& capture, bool& close) {
     case kFxaa: port_pc_set_fxaa(!port_pc_fxaa()); break;
     case kMsaa:
         if (port_pc_msaa_max() > 1) port_pc_next_msaa();
+        break;
+    case kResUp:
+        if (port_pc_res_index() + 1 < port_pc_res_count()) port_pc_set_res_index(port_pc_res_index() + 1);
+        break;
+    case kResDown:
+        if (port_pc_res_index() > 0) port_pc_set_res_index(port_pc_res_index() - 1);
+        break;
+    case kMsaaUp:  // (the next choice, but not round from the last to off)
+        if (port_pc_msaa_max() > 1 && port_pc_msaa() < port_pc_msaa_max()) port_pc_next_msaa();
+        break;
+    case kMsaaDown:  // (half: the choices are 1, 2, 4 ...; next_msaa doubles and goes round to off after the last)
+        if (port_pc_msaa_max() > 1 && port_pc_msaa() > 1) {
+            const int want = port_pc_msaa() / 2;
+            for (int guard = 0; guard < 8 && port_pc_msaa() != want; ++guard) port_pc_next_msaa();
+        }
         break;
     case kFps: port_pc_set_fps_counter(!port_pc_fps_counter()); break;
     case kVsync: port_pc_set_vsync(!port_pc_vsync()); break;

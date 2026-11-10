@@ -76,7 +76,7 @@ public:
         // The button's centre is (-181, -176) in the layout (Back -276, -176 and its child +95); the animations move Back,
         // so the whole layout is placed: centre at (mX, mCenter), scaled.
         if (nw4r::lyt::Pane* q = MR::getPane(this, "RootPane")) {
-            q->mTranslate.x = mX + 181.0f * mScale;
+            q->mTranslate.x = mX + 181.0f * mScale + 14.0f;  // (+14: measured on screen, the circle sat 14 units left)
             q->mTranslate.y = mCenter + 176.0f * mScale;
             q->mScale.x = mScale;
             q->mScale.y = mScale;
@@ -174,7 +174,7 @@ const Item kGraphicsItems[] = {{kRes, -kGx, 40, kG},  {kFsr, 0, 40, kG},       {
                                {kMsaa, -kGx, -20, kG}, {kFps, 0, -20, kG},      {kVsync, kGx, -20, kG},
                                {kFull, -kGx, -80, kG}, {kFpsLimit, 0, -80, kG}, {kToMain, kGx, -80, kG}};
 // Audio: each value with a small - / + button against its left and right end (the value is 140 wide at 55 %).
-constexpr f32 kRound = 0.6f, kRoundX = 1.0f, kSide = 100.0f;  // (kRoundX > 0: a round button)
+constexpr f32 kRound = 0.6f, kRoundX = 1.0f, kSide = 93.0f;  // (kRoundX > 0: a round button)
 const Item kAudioItems[] = {{kVolMaster, 0, 54, kS}, {kVolMasterDown, -kSide, 54, kRound, kRoundX}, {kVolMasterUp, kSide, 54, kRound, kRoundX},
                             {kVolMusic, 0, 2, kS},   {kVolMusicDown, -kSide, 2, kRound, kRoundX},   {kVolMusicUp, kSide, 2, kRound, kRoundX},
                             {kVolSfx, 0, -50, kS},   {kVolSfxDown, -kSide, -50, kRound, kRoundX},   {kVolSfxUp, kSide, -50, kRound, kRoundX},

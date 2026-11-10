@@ -37,6 +37,10 @@
 #include <cstring>
 #include <revolution/gd/GDBase.h>
 
+#if defined(TARGET_PC) && defined(_WIN32)
+extern "C" int port_pc_skin_own_face(void);  // platform/windows/pc_settings.cpp: skin.ini face=model
+#endif
+
 namespace MR {
     void showMaterial(J3DModel*, const char*);
 };  // namespace MR
@@ -624,9 +628,6 @@ void MarioActor::swapTextureInit() {
     initBlink();
 }
 
-#if defined(TARGET_PC) && defined(_WIN32)
-extern "C" int port_pc_skin_own_face(void);  // platform/windows/pc_settings.cpp: skin.ini face=model
-#endif
 
 void MarioActor::initFace() {
     _A5B = 8;
@@ -922,7 +923,11 @@ void MarioActor::drawReflectModel() const {
     MR::hideJoint(model, "HandR0");
     MR::hideJoint(model, "HandL0");
 
-    if (static_cast< s8 >(mCurrModel) != 4U) {
+    if (static_cast< s8 >(mCurrModel) != 4U
+#if defined(TARGET_PC) && defined(_WIN32)
+        && !port_pc_skin_own_face()  // (a skin with its own face keeps its Face0 part)
+#endif
+    ) {
         MR::hideJoint(model, "Face0");
     }
 

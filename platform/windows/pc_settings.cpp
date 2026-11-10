@@ -549,6 +549,25 @@ extern "C" float port_pc_skin_anim_scale(void) {
     return scale;
 }
 
+// skins/<name>/skin.ini face=model: the skin's model has its own face (the game's separate face model is not drawn).
+extern "C" int port_pc_skin_own_face(void) {
+    static int own = [] {
+        if (!sSkinStart[0]) return 0;
+        int v = 0;
+        if (FILE* f = _wfopen(Wide(SkinsDir() + "/" + sSkinStart + "/skin.ini").c_str(), L"r")) {
+            char line[128];
+            while (fgets(line, sizeof line, f)) {
+                line[strcspn(line, "\r\n")] = 0;
+                if (!strcmp(line, "face=model")) v = 1;
+            }
+            fclose(f);
+        }
+        if (v) port_log("skin: %s, its own face (face=model)", sSkinStart);
+        return v;
+    }();
+    return own;
+}
+
 extern "C" int port_pc_skin_look(void) {
     static int look = [] {
         if (!sSkinStart[0]) return -1;

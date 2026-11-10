@@ -624,8 +624,15 @@ void MarioActor::swapTextureInit() {
     initBlink();
 }
 
+#if defined(TARGET_PC) && defined(_WIN32)
+extern "C" int port_pc_skin_own_face(void);  // platform/windows/pc_settings.cpp: skin.ini face=model
+#endif
+
 void MarioActor::initFace() {
     _A5B = 8;
+#if defined(TARGET_PC) && defined(_WIN32)
+    if (!port_pc_skin_own_face())  // (a skin with its own face keeps its Face0 part)
+#endif
     MR::hideJoint(mModels[0], "Face0");
     _A60 = 0;
 
@@ -663,6 +670,12 @@ void MarioActor::updateFace() {
         MR::hideModel(_A5C);
         return;
     }
+#if defined(TARGET_PC) && defined(_WIN32)
+    if (port_pc_skin_own_face()) {  // (skin.ini face=model: the game's face model is never drawn)
+        MR::hideModel(_A5C);
+        return;
+    }
+#endif
 
     if (MR::isHiddenModel(this) || is481or482On() || mMario->mMovementStates._F || _1C3) {
         MR::hideModel(_A5C);

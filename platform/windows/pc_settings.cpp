@@ -116,7 +116,7 @@ extern "C" void port_pc_settings_init(const char* saveRoot) {
             } else if (!strcmp(line, "fxaa")) {
                 sFxaa = atoi(v) != 0;
             } else if (!strcmp(line, "ssao")) {
-                sSsao = atoi(v) == 2 ? 2 : atoi(v) != 0;  // (2: the occlusion shown alone, for tuning)
+                sSsao = (atoi(v) == 2 || atoi(v) == 3) ? atoi(v) : atoi(v) != 0;  // (2: the occlusion shown alone, for tuning)
             } else if (!strcmp(line, "msaa")) {
                 const int m = atoi(v);
                 sMsaa = m >= 4 ? 4 : m >= 2 ? 2 : 1;  // (at most 4x)

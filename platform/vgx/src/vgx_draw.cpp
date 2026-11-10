@@ -2420,7 +2420,8 @@ bool CharaAAPlayerOnly() {
 extern "C" {
 int port_vgx_ssao = 0; // (the PC Settings' SSAO switch: platform/windows/pc_settings.cpp; 2: the occlusion shown alone)
 }
-extern "C" int port_vgx_ssao_view(void) { return port_vgx_ssao == 2; }
+extern "C" int port_vgx_ssao_view(void) { return port_vgx_ssao >= 2; }
+extern "C" float port_vgx_ssao_depth_view(void) { return port_vgx_ssao == 3 ? 50.0f : 0.0f; }
 int EdgeAAMode() {
     const int m = static_cast<int>(VGX_KNOB(static_cast<int>(std::clamp<long>(EnvInt("GXV_EDGE_AA", 0), 0, 3))));
     return m;

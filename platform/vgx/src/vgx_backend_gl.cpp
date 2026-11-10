@@ -5032,6 +5032,7 @@ void CapturePresented(const CopyDispCmd& c, int x, int y, int w, int h) {
 // alone. Needs the depth as a texture (OES_depth_texture); with multisampling the depth is resolved with the colour (EfbForRead).
 extern "C" void port_log(const char* fmt, ...);  // (the game's log; declared above only for some builds)
 extern "C" int port_vgx_ssao_view(void); // (vgx_draw.cpp: ssao=2, the occlusion shown alone)
+extern "C" float port_vgx_ssao_depth_view(void); // (ssao=3: the depth shown, (1 - d) x 50)
 struct SsaoProg {
     GLuint prog = 0;
     bool failed = false;
@@ -5053,6 +5054,7 @@ bool EnsureSsaoProgram() {
         "    }\n"
         "  }\n"
         "  float d = texture2D(u_depth, px * u_size.zw).r;\n"
+        "  if (u_p.w > 0.5) { gl_FragColor = vec4(vec3(clamp((1.0 - d) * u_p.w, 0.0, 1.0)), 1.0); return; }\n"
         "  if (d >= 0.99999) { gl_FragColor = vec4(1.0); return; }\n"
         "  float z = 1.0 / max(1.0 - d, 1e-6);\n"
         "  float a = fract(sin(dot(floor(px), vec2(12.9898, 78.233))) * 43758.5453) * 6.2831853;\n"
@@ -5203,7 +5205,7 @@ void RunSsao(const CopyDispCmd& c) {
     }
     G(glUniform4fv(g_ssaoProg.hud, 16, hud));
     // radius: 2.5 % of the picture's height; strength 0.85 (a pixel fully surrounded keeps 15 % of its light)
-    G(glUniform4f(g_ssaoProg.p, static_cast<float>(h) * 0.025f, 0.85f, static_cast<float>(n), 0.0f));
+    G(glUniform4f(g_ssaoProg.p, static_cast<float>(h) * 0.025f, 0.85f, static_cast<float>(n), port_vgx_ssao_depth_view()));
     G(glBindBuffer(GL_ARRAY_BUFFER, g_quadVbo));
     for (int a = 1; a < AT_COUNT; ++a) G(glDisableVertexAttribArray(static_cast<GLuint>(a)));
     G(glEnableVertexAttribArray(AT_POS));

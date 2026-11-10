@@ -51,9 +51,13 @@ public:
         static const char* const kLeft[] = {"ShaLButton", "PicLFrame", "PicLButton", "PicLShine"};
         static const char* const kRight[] = {"ShaRButton", "PicRFrame", "PicRButton", "PicRShine"};
         for (const char* name : kLeft)
-            if (nw4r::lyt::Pane* q = MR::getPane(this, name)) q->mTranslate.x = -15.5f;
+            if (nw4r::lyt::Pane* q = MR::getPane(this, name)) q->mTranslate.x = 0.0f;  // (anchored at its right edge: spans -32..0)
         for (const char* name : kRight)
-            if (nw4r::lyt::Pane* q = MR::getPane(this, name)) q->mTranslate.x = 15.5f;
+            if (nw4r::lyt::Pane* q = MR::getPane(this, name)) q->mTranslate.x = 0.0f;  // (anchored at its left edge: spans 0..32)
+        if (nw4r::lyt::Pane* q = MR::getPane(this, "BButtonText")) {  // (the text was written for a wide button: larger)
+            q->mScale.x = 1.8f;
+            q->mScale.y = 1.8f;
+        }
         static const char* const kText[] = {"Txt", "Sha", "TxtJpJa", "ShaJpJa", "TxtUsEn", "ShaUsEn", "TxtEuEn", "ShaEuEn"};
         for (const char* name : kText)  // (the text sat right of the arrow)
             if (nw4r::lyt::Pane* q = MR::getPane(this, name)) q->mTranslate.x = name[0] == 'S' ? 1.8f : 0.0f;

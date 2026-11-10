@@ -36,7 +36,17 @@ namespace JMath {
         if (x == 0.0f) {
             return 0.0f;
         }
+#ifdef TARGET_PC
+        // A NaN or infinite ratio (a broken matrix, e.g. a skin model whose joints do not match the animation) read far outside
+        // the table; the ratio is 0..1 for valid input, so the index stays within [0, Len] (mTable[Len] is _1000, 45 degrees).
+        const f32 at = 0.5f + Len * y / x;
+        if (!(at >= 0.0f)) {
+            return 0.0f;
+        }
+        return mTable[at > Len ? Len : static_cast< s32 >(at)];
+#else
         return mTable[static_cast< s32 >(0.5f + Len * y / x)];
+#endif
     }
 
     template < int Bits, typename T >

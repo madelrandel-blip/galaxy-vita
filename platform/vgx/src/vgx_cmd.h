@@ -296,6 +296,9 @@ struct CopyDispCmd {
     // and then draws these rectangles (EFB pixels, the HUD's draws, padded and merged) again plainly over it, so no HUD pixel is
     // ever filtered. edge false: no whole-picture pass for this copy (switch off, or the HUD covers too much of it).
     bool edge = false;
+    // SSAO (port_vgx_ssao, the PC Settings): the back end darkens the 3D scene's creases before the present, from the EFB's depth,
+    // outside the `hud` rectangles (backend RunSsao). The rectangles are found as for `edge`.
+    bool ssao = false;
     uint8_t hudN = 0;
     EfbRect hud[kCharaBoxes];
 };

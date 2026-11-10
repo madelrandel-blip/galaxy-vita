@@ -2417,17 +2417,20 @@ bool CharaAAPlayerOnly() {
 //   GXV_EDGE_AA_HUD=<pct> most of the display copy the HUD rectangles may cover (default 50); above it the copy is presented
 //                         as before (a menu over the picture: filtering, then covering most of it again, would cost for nothing)
 // Back-end switches (vgx_backend_gl.cpp, EdgeParams): GXV_EDGE_AA_THRESHOLD, GXV_EDGE_AA_MIN, GXV_EDGE_AA_SHARPNESS.
+extern "C" {
+int port_vgx_ssao = 0; // (the PC Settings' SSAO switch: platform/windows/pc_settings.cpp)
+}
 int EdgeAAMode() {
     const int m = static_cast<int>(VGX_KNOB(static_cast<int>(std::clamp<long>(EnvInt("GXV_EDGE_AA", 0), 0, 3))));
     return m;
 }
 namespace {
 inline bool ChaOn() {
-    const bool on = VGX_KNOB(CharaAAMode() != 0 || EdgeAAMode() != 0) != 0; // (GXV_EDGE_AA: the HUD's rectangles)
+    const bool on = VGX_KNOB(CharaAAMode() != 0 || EdgeAAMode() != 0) != 0 || port_vgx_ssao != 0; // (GXV_EDGE_AA, SSAO: the HUD's rectangles)
     return on;
 }
-inline bool EdgeOn() {
-    const bool on = VGX_KNOB(EdgeAAMode() != 0) != 0;
+inline bool EdgeOn() { // (the HUD's rectangles at the display copy: for GXV_EDGE_AA and for SSAO)
+    const bool on = VGX_KNOB(EdgeAAMode() != 0) != 0 || port_vgx_ssao != 0;
     return on;
 }
 inline bool CharaNoteOn() { // (characters are noted for GXV_CHARAA / GXV_CHARAA_AUTO only, not for GXV_EDGE_AA)
@@ -2707,6 +2710,7 @@ void CharaCleared(const EfbRect& src) {
 void EdgeFinish(CopyDispCmd& c) {
     const int64_t maxPct = static_cast<int64_t>(VGX_KNOB(std::clamp<long>(EnvInt("GXV_EDGE_AA_HUD", 50), 1, 100)));
     c.edge = false;
+    c.ssao = false;
     c.hudN = 0;
     ++g_edgeCtr[0];
     EfbRect w[kChaHud];
@@ -2746,7 +2750,8 @@ void EdgeFinish(CopyDispCmd& c) {
     if (area * 100 > RArea(c.src) * maxPct) { ++g_edgeCtr[3]; return; }
     for (int i = 0; i < n; ++i) c.hud[i] = w[i];
     c.hudN = static_cast<uint8_t>(n);
-    c.edge = true;
+    c.edge = EdgeAAMode() != 0;
+    c.ssao = port_vgx_ssao != 0;
     ++g_edgeCtr[1];
     g_edgeCtr[2] += static_cast<uint64_t>(n);
 }
@@ -3968,6 +3973,7 @@ static uint64_t HashBuf(const CmdBuf& b, uint64_t h, bool content) {
                              c.clear.z};
         mix(v, sizeof v);
         if (c.charaN) mix(c.chara, sizeof(EfbRect) * c.charaN); // (GXV_CHARAA; frames without boxes hash as before)
+        if (c.ssao) { const uint32_t e = 0x55A0u; mix(&e, 4); }
         if (c.edge) { const uint32_t e = 0xED6Eu + c.hudN; mix(&e, 4); if (c.hudN) mix(c.hud, sizeof(EfbRect) * c.hudN); } // (GXV_EDGE_AA; likewise)
     }
     for (const SetTargetCmd& t : b.targets) { const uint32_t v[2] = {t.efbW, t.efbH}; mix(v, sizeof v); }

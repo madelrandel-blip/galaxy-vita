@@ -150,7 +150,7 @@ enum Id {
     // main
     kGoGraphics, kGoAudio, kGoControls, kGoGame, kClose,
     // graphics
-    kRes, kResDown, kResUp, kFsr, kFxaa, kMsaa, kMsaaDown, kMsaaUp, kFps, kVsync, kFull, kFpsLimit,
+    kRes, kResDown, kResUp, kFsr, kFxaa, kMsaa, kMsaaDown, kMsaaUp, kFps, kVsync, kFull, kFpsLimit, kSsao,
     // audio (value, minus, plus for each)
     kVolMaster, kVolMasterDown, kVolMasterUp, kVolMusic, kVolMusicDown, kVolMusicUp, kVolSfx, kVolSfxDown, kVolSfxUp,
     // controls
@@ -175,7 +175,7 @@ const Item kGraphicsItems[] = {{kRes, -kGx, 54, kG},  {kResDown, -kGx - kGSide, 
                                {kFsr, 0, 54, kG},     {kFxaa, kGx, 54, kG},
                                {kMsaa, -kGx, 2, kG},  {kMsaaDown, -kGx - kGSide, 2, 0.6f, 1.0f}, {kMsaaUp, -kGx + kGSide, 2, 0.6f, 1.0f},
                                {kFps, 0, 2, kG},      {kVsync, kGx, 2, kG},
-                               {kFull, -kGx, -50, kG}, {kFpsLimit, 0, -50, kG},
+                               {kFull, -kGx, -50, kG}, {kFpsLimit, 0, -50, kG}, {kSsao, kGx, -50, kG},
                                {kToMain, 0, -102, kS}};
 // Audio: each value with a small - / + button against its left and right end (the value is 140 wide at 55 %).
 constexpr f32 kRound = 0.6f, kRoundX = 1.0f, kSide = 93.0f;  // (kRoundX > 0: a round button)
@@ -257,6 +257,7 @@ void TextOf(int id, char* text, int size) {
     case kRes: snprintf(text, size, "Resolution: %s", port_pc_res_name(port_pc_res_index())); return;
     case kFsr: snprintf(text, size, port_pc_fsr() ? "FSR: On" : "FSR: Off"); return;
     case kFxaa: snprintf(text, size, port_pc_fxaa() ? "FXAA: On" : "FXAA: Off"); return;
+    case kSsao: snprintf(text, size, port_pc_ssao() ? "SSAO: On" : "SSAO: Off"); return;
     case kResDown: case kMsaaDown: snprintf(text, size, "-"); return;
     case kResUp: case kMsaaUp: snprintf(text, size, "+"); return;
     case kMsaa:
@@ -374,6 +375,7 @@ Page Activate(int slot, bool& capture, bool& close) {
     case kRes: port_pc_set_res_index((port_pc_res_index() + 1) % port_pc_res_count()); break;
     case kFsr: port_pc_set_fsr(!port_pc_fsr()); break;
     case kFxaa: port_pc_set_fxaa(!port_pc_fxaa()); break;
+    case kSsao: port_pc_set_ssao(!port_pc_ssao()); break;
     case kMsaa:
         if (port_pc_msaa_max() > 1) port_pc_next_msaa();
         break;

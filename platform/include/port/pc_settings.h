@@ -22,6 +22,8 @@ void port_pc_set_vsync(int on);
 // Picture smoothing and upscaling (the window host applies FXAA and FSR at the present; MSAA is the renderer's).
 int port_pc_fxaa(void);
 void port_pc_set_fxaa(int on);
+int port_pc_ssao(void);         // screen-space ambient occlusion: 0 off, 1 on
+void port_pc_set_ssao(int on);
 int port_pc_msaa(void);           // samples a pixel: 1 (off), 2, 4, 8, 16
 int port_pc_msaa_max(void);       // the most this graphics card allows (1: none, e.g. Direct3D 9); 0 until the renderer is up
 void port_pc_next_msaa(void);     // the next choice the card allows (off after the last)

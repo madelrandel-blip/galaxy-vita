@@ -5024,8 +5024,144 @@ void CapturePresented(const CopyDispCmd& c, int x, int y, int w, int h) {
     g_inUseFbo = ~0u;
     BindFbo(g_efbFbo);
 }
+// ---- SSAO (screen-space ambient occlusion; the PC Settings, CopyDispCmd::ssao): at the display copy, before the present, the
+// EFB's colour is multiplied by an occlusion factor found from the EFB's depth: for each pixel, 16 depth samples on a spiral
+// around it (turned by a per-pixel angle); a sample nearer the camera than the pixel by 1 % to 12 % of the pixel's distance
+// occludes it (nearer still: another object in front, no darkening: no halos). Distance from the stored depth as for any
+// perspective with a far plane well beyond the near one: z ~ near / (1 - d). The sky (depth 1) and the HUD's rectangles are left
+// alone. Needs the depth as a texture (OES_depth_texture); with multisampling the depth is resolved with the colour (EfbForRead).
+struct SsaoProg {
+    GLuint prog = 0;
+    bool failed = false;
+    GLint size = -1, hud = -1, p = -1, depth = -1;
+} g_ssaoProg;
+bool EnsureSsaoProgram() {
+    if (g_ssaoProg.prog) return true;
+    if (g_ssaoProg.failed) return false;
+    static const char* vs = "attribute vec4 a_pos;\nvoid main() { gl_Position = vec4(a_pos.xy, 0.0, 1.0); }\n";
+    static const char* fs =
+        "precision highp float;\nuniform sampler2D u_depth;\nuniform vec4 u_size;\nuniform vec4 u_hud[16];\nuniform vec4 u_p;\n"
+        "float Z(vec2 px) { return 1.0 / max(1.0 - texture2D(u_depth, px * u_size.zw).r, 1e-6); }\n"
+        "void main() {\n"
+        "  vec2 px = gl_FragCoord.xy;\n"
+        "  for (int i = 0; i < 16; ++i) {\n"
+        "    if (float(i) < u_p.z) {\n"
+        "      vec4 r = u_hud[i];\n"
+        "      if (px.x >= r.x && px.y >= r.y && px.x < r.z && px.y < r.w) { gl_FragColor = vec4(1.0); return; }\n"
+        "    }\n"
+        "  }\n"
+        "  float d = texture2D(u_depth, px * u_size.zw).r;\n"
+        "  if (d >= 0.99999) { gl_FragColor = vec4(1.0); return; }\n"
+        "  float z = 1.0 / max(1.0 - d, 1e-6);\n"
+        "  float a = fract(sin(dot(floor(px), vec2(12.9898, 78.233))) * 43758.5453) * 6.2831853;\n"
+        "  float occ = 0.0;\n"
+        "  for (int i = 0; i < 16; ++i) {\n"
+        "    float t = (float(i) + 0.5) / 16.0;\n"
+        "    float ang = a + float(i) * 2.3999632;\n"
+        "    vec2 o = vec2(cos(ang), sin(ang)) * (u_p.x * sqrt(t));\n"
+        "    float dz = (z - Z(px + o)) / z;\n"
+        "    occ += smoothstep(0.01, 0.04, dz) * (1.0 - smoothstep(0.08, 0.12, dz));\n"
+        "  }\n"
+        "  float ao = 1.0 - u_p.y * occ / 16.0;\n"
+        "  gl_FragColor = vec4(vec3(ao), 1.0);\n"
+        "}\n";
+    const GLuint v = Compile(GL_VERTEX_SHADER, vs, "ssao vertex");
+    const GLuint f = Compile(GL_FRAGMENT_SHADER, fs, "ssao fragment");
+    GLint vok = 0, fok = 0, lok = 0;
+    if (v) G(glGetShaderiv(v, GL_COMPILE_STATUS, &vok));
+    if (f) G(glGetShaderiv(f, GL_COMPILE_STATUS, &fok));
+    GLuint prog = 0;
+    if (vok && fok) {
+        prog = G(glCreateProgram());
+        if (BadGlName(prog)) prog = 0;
+    }
+    if (prog) {
+        G(glAttachShader(prog, v));
+        G(glAttachShader(prog, f));
+        G(glBindAttribLocation(prog, AT_POS, "a_pos"));
+        G(glLinkProgram(prog));
+        G(glGetProgramiv(prog, GL_LINK_STATUS, &lok));
+        if (!lok) { G(glDeleteProgram(prog)); prog = 0; }
+    }
+    if (v) G(glDeleteShader(v));
+    if (f) G(glDeleteShader(f));
+    if (!prog) {
+        g_ssaoProg.failed = true;
+        port_log("ssao: the shader did not build: no SSAO");
+        return false;
+    }
+    g_ssaoProg.prog = prog;
+    g_ssaoProg.size = G(glGetUniformLocation(prog, "u_size"));
+    g_ssaoProg.hud = G(glGetUniformLocation(prog, "u_hud"));
+    g_ssaoProg.p = G(glGetUniformLocation(prog, "u_p"));
+    g_ssaoProg.depth = G(glGetUniformLocation(prog, "u_depth"));
+    port_log("ssao: shader built");
+    return true;
+}
+void RunSsao(const CopyDispCmd& c) {
+    static bool told = false;
+    if (!g_hasDepthTex || !g_efbDepthTex) {
+        if (!told) { told = true; port_log("ssao: no depth texture on this GPU (OES_depth_texture): no SSAO"); }
+        return;
+    }
+    if (!EnsureSsaoProgram()) return;
+    const float sx = ScaleX(), sy = ScaleY();
+    int x = Rnd(c.src.x * sx), y = Rnd(c.src.y * sy), w = Rnd(c.src.w * sx), h = Rnd(c.src.h * sy);
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
+    if (x + w > g_rtW) w = g_rtW - x;
+    if (y + h > g_rtH) h = g_rtH - y;
+    if (w <= 0 || h <= 0) return;
+    EfbForRead(); // (multisampled: colour and depth resolved into g_efbFbo's texture and depth texture; g_efbFbo bound)
+    G(glBindFramebuffer(GL_FRAMEBUFFER, g_efbFbo));
+    // the depth texture is read: not attached while it is (a feedback loop otherwise)
+    G(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, 0, 0));
+    G(glViewport(x, y, w, h));
+    G(glDisable(GL_SCISSOR_TEST));
+    G(glDisable(GL_DEPTH_TEST));
+    G(glDisable(GL_CULL_FACE));
+    G(glDepthMask(GL_FALSE));
+    G(glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE));
+    G(glEnable(GL_BLEND));
+    G(glBlendEquation(GL_FUNC_ADD));
+    G(glBlendFunc(GL_ZERO, GL_SRC_COLOR)); // (the picture times the occlusion factor)
+    G(glUseProgram(g_ssaoProg.prog));
+    G(glActiveTexture(GL_TEXTURE0));
+    G(glBindTexture(GL_TEXTURE_2D, g_efbDepthTex));
+    G(glUniform1i(g_ssaoProg.depth, 0));
+    const float tw = static_cast<float>(g_rtW), th = static_cast<float>(g_rtH);
+    G(glUniform4f(g_ssaoProg.size, tw, th, 1.0f / tw, 1.0f / th));
+    float hud[16 * 4] = {};
+    const int n = c.hudN < 16 ? c.hudN : 16;
+    for (int i = 0; i < n; ++i) {
+        hud[i * 4 + 0] = c.hud[i].x * sx;
+        hud[i * 4 + 1] = c.hud[i].y * sy;
+        hud[i * 4 + 2] = (c.hud[i].x + c.hud[i].w) * sx;
+        hud[i * 4 + 3] = (c.hud[i].y + c.hud[i].h) * sy;
+    }
+    G(glUniform4fv(g_ssaoProg.hud, 16, hud));
+    // radius: 2.5 % of the picture's height; strength 0.85 (a pixel fully surrounded keeps 15 % of its light)
+    G(glUniform4f(g_ssaoProg.p, static_cast<float>(h) * 0.025f, 0.85f, static_cast<float>(n), 0.0f));
+    G(glBindBuffer(GL_ARRAY_BUFFER, g_quadVbo));
+    for (int a = 1; a < AT_COUNT; ++a) G(glDisableVertexAttribArray(static_cast<GLuint>(a)));
+    G(glEnableVertexAttribArray(AT_POS));
+    G(glVertexAttribPointer(AT_POS, 2, GL_FLOAT, GL_FALSE, 0, nullptr));
+    G(glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+    G(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, g_efbDepthTex, 0));
+    G(glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE));
+    G(glDepthMask(GL_TRUE));
+    G(glDisable(GL_BLEND));
+    // (every cached GL state is stale now)
+    Invalidate();
+    g_rsValid = false;
+    S.fbo = ~0u;
+    static bool first = true;
+    if (first) { first = false; port_log("ssao: on (%dx%d, %d HUD rectangles left alone)", w, h, n); }
+}
+
 void CopyDisp(const CopyDispCmd& c) {
     if (VerifyRead(c)) { Clear(c.clear, c.src); return; } // (GXV_PASSVERIFY's reference runs: read back, nothing shown)
+    if (c.ssao && g_presentHook) RunSsao(c);
     if (g_capture || g_presentHook) {
         const float sx = ScaleX(), sy = ScaleY();
         int x = Rnd(c.src.x * sx), y = Rnd(c.src.y * sy), w = Rnd(c.src.w * sx), h = Rnd(c.src.h * sy);

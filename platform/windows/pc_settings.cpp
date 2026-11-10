@@ -21,6 +21,7 @@
 extern "C" void port_vgx_request_render_size(int w, int h);  // platform/src/gx/vgx_galaxy.cpp: render thread, next frame
 extern "C" void port_vgx_request_msaa(int samples);
 extern "C" int port_vgx_msaa_max(void);
+extern "C" int port_vgx_ssao;  // (platform/vgx/src/vgx_draw.cpp: the renderer's SSAO switch)
 
 namespace {
 struct Resolution {
@@ -35,6 +36,7 @@ constexpr int kResCount = sizeof kRes / sizeof kRes[0];
 constexpr int kDefaultRes = 2;  // 1080p
 
 std::atomic<int> sRes{kDefaultRes}, sFps{1}, sVsync{1}, sFxaa{0}, sMsaa{1}, sFsr{0}, sFull{0};
+std::atomic<int> sSsao{0};
 char sPath[1024];
 char sRoot[1024];
 
@@ -82,7 +84,7 @@ void Save() {
             sFps.load(), sVsync.load(), sFxaa.load(), sMsaa.load(), sFsr.load(), sFull.load());
     for (int i = 0; i < PORT_PC_VOL_COUNT; ++i) fprintf(f, "%s=%d\n", kVolKey[i], sVol[i].load());
     fprintf(f, "skin=%s\n", sSkin);
-    fprintf(f, "fps_limit=%d\ngyro=%d\nlanguage=%s\n", sFpsLimit.load(), sGyro.load(), sLanguage);
+    fprintf(f, "fps_limit=%d\ngyro=%d\nlanguage=%s\nssao=%d\n", sFpsLimit.load(), sGyro.load(), sLanguage, sSsao.load());
     fprintf(f, "# controls: bind_<action>=<keyboard>,<controller> (SDL scancode or 1000 + mouse button; SDL controller button, 100 LT, 101 RT; -1 none)\n");
     for (int i = 0; i < PORT_PC_ACT_COUNT; ++i) fprintf(f, "bind_%s=%d,%d\n", kActions[i].id, sKey[i].load(), sPad[i].load());
     fclose(f);
@@ -113,9 +115,11 @@ extern "C" void port_pc_settings_init(const char* saveRoot) {
                 sVsync = atoi(v) != 0;
             } else if (!strcmp(line, "fxaa")) {
                 sFxaa = atoi(v) != 0;
+            } else if (!strcmp(line, "ssao")) {
+                sSsao = atoi(v) != 0;
             } else if (!strcmp(line, "msaa")) {
                 const int m = atoi(v);
-                sMsaa = m >= 16 ? 16 : m >= 8 ? 8 : m >= 4 ? 4 : m >= 2 ? 2 : 1;
+                sMsaa = m >= 4 ? 4 : m >= 2 ? 2 : 1;  // (at most 4x)
             } else if (!strcmp(line, "fsr")) {
                 sFsr = atoi(v) != 0;
             } else if (!strcmp(line, "fullscreen")) {
@@ -145,6 +149,7 @@ extern "C" void port_pc_settings_init(const char* saveRoot) {
     } else {
         Save();  // (a fresh file with the defaults, to edit by hand if wanted)
     }
+    port_vgx_ssao = sSsao.load();  // (the renderer's SSAO switch, from the file)
     snprintf(sSkinStart, sizeof sSkinStart, "%s", sSkin);
     // (environment variables override the file for this session, unsaved)
     if (const char* e = getenv("PETARI_FPS")) sFps = atoi(e) != 0;
@@ -182,6 +187,15 @@ extern "C" void port_pc_set_vsync(int on) {
 }
 
 extern "C" int port_pc_fxaa(void) { return sFxaa.load(); }
+// SSAO (screen-space ambient occlusion): the renderer darkens creases and contact areas of the 3D scene at the display copy
+// (platform/vgx/src/vgx_backend_gl.cpp, RunSsao), never the HUD. port_vgx_ssao is the renderer's switch (vgx_draw.cpp).
+extern "C" int port_pc_ssao(void) { return sSsao.load(); }
+extern "C" void port_pc_set_ssao(int on) {
+    sSsao = on != 0;
+    port_vgx_ssao = sSsao.load();
+    port_log("pc settings: SSAO %s", on ? "on" : "off");
+    Save();
+}
 extern "C" void port_pc_set_fxaa(int on) {
     sFxaa = on != 0;
     Save();
@@ -191,7 +205,10 @@ extern "C" int port_pc_msaa(void) {
     const int m = sMsaa.load();
     return top > 0 && m > top ? top : m;
 }
-extern "C" int port_pc_msaa_max(void) { return port_vgx_msaa_max(); }
+extern "C" int port_pc_msaa_max(void) {  // (the card's most, but never above 4x)
+    const int top = port_vgx_msaa_max();
+    return top > 4 ? 4 : top;
+}
 extern "C" void port_pc_next_msaa(void) {
     const int top = port_vgx_msaa_max();
     int m = port_pc_msaa() * 2;

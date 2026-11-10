@@ -5101,11 +5101,67 @@ bool EnsureSsaoProgram() {
 }
 void RunSsao(const CopyDispCmd& c) {
     static bool told = false;
-    if (!g_hasDepthTex || !g_efbDepthTex) {
-        if (!told) { told = true; port_log("ssao: no depth texture on this GPU (OES_depth_texture): no SSAO"); }
+    if (!EnsureSsaoProgram()) return;
+    // The depth to read: the EFB's own depth texture where the GL has OES_depth_texture; otherwise (ANGLE's OpenGL ES 3 has depth
+    // textures in its core, without the extension's name, and the EFB keeps a depth renderbuffer) the EFB's depth is copied
+    // (glBlitFramebuffer, from the multisampled object when there is one) into SSAO's own depth texture of the same format.
+    static GLuint ownFbo = 0, ownTex = 0;
+    static int ownW = 0, ownH = 0;
+    static bool ownFailed = false;
+    GLuint depthTex = 0;
+    bool fromEfb = false;
+    if (g_hasDepthTex && g_efbDepthTex) {
+        depthTex = g_efbDepthTex;
+        fromEfb = true;
+    }
+#if !defined(__VGX_VITA__)
+    else if (!ownFailed && glBlitFramebuffer) {
+        const GLenum kRead = 0x8CA8, kDraw = 0x8CA9; // GL_READ_FRAMEBUFFER, GL_DRAW_FRAMEBUFFER
+        if (!ownFbo || ownW != g_rtW || ownH != g_rtH) {
+            if (!ownTex) G(glGenTextures(1, &ownTex));
+            if (!ownFbo) G(glGenFramebuffers(1, &ownFbo));
+            G(glBindTexture(GL_TEXTURE_2D, ownTex));
+            if (g_hasDepth24) G(glTexImage2D(GL_TEXTURE_2D, 0, 0x81A6 /* GL_DEPTH_COMPONENT24 */, g_rtW, g_rtH, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr));
+            else G(glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT16, g_rtW, g_rtH, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, nullptr));
+            G(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
+            G(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
+            G(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+            G(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+            G(glBindFramebuffer(GL_FRAMEBUFFER, ownFbo));
+            G(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, ownTex, 0));
+            const GLenum st = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+            ownW = g_rtW;
+            ownH = g_rtH;
+            S.fbo = ~0u;
+            Invalidate();
+            if (st != GL_FRAMEBUFFER_COMPLETE) {
+                ownFailed = true;
+                port_log("ssao: its depth texture cannot be a render target here (0x%X): no SSAO", st);
+                return;
+            }
+            port_log("ssao: own depth texture %dx%d (%s), copied from the EFB's depth", g_rtW, g_rtH, g_hasDepth24 ? "24-bit" : "16-bit");
+        }
+        const GLuint src = (g_efbSamples > 1 && g_efbMs.fbo) ? g_efbMs.fbo : g_efbFbo;
+        while (glGetError() != GL_NO_ERROR) {}
+        glBindFramebuffer(kRead, src);
+        glBindFramebuffer(kDraw, ownFbo);
+        glDisable(GL_SCISSOR_TEST);
+        glBlitFramebuffer(0, 0, g_rtW, g_rtH, 0, 0, g_rtW, g_rtH, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+        const GLenum err = glGetError();
+        S.fbo = ~0u;
+        if (err != GL_NO_ERROR) {
+            ownFailed = true;
+            port_log("ssao: the GL refuses the depth copy (0x%X; samples %d): no SSAO", err, g_efbSamples);
+            Invalidate();
+            return;
+        }
+        depthTex = ownTex;
+    }
+#endif
+    if (!depthTex) {
+        if (!told) { told = true; port_log("ssao: no way to read the depth on this GPU: no SSAO"); }
         return;
     }
-    if (!EnsureSsaoProgram()) return;
     const float sx = ScaleX(), sy = ScaleY();
     int x = Rnd(c.src.x * sx), y = Rnd(c.src.y * sy), w = Rnd(c.src.w * sx), h = Rnd(c.src.h * sy);
     if (x < 0) x = 0;
@@ -5116,7 +5172,7 @@ void RunSsao(const CopyDispCmd& c) {
     EfbForRead(); // (multisampled: colour and depth resolved into g_efbFbo's texture and depth texture; g_efbFbo bound)
     G(glBindFramebuffer(GL_FRAMEBUFFER, g_efbFbo));
     // the depth texture is read: not attached while it is (a feedback loop otherwise)
-    G(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, 0, 0));
+    if (fromEfb) G(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, 0, 0));
     G(glViewport(x, y, w, h));
     G(glDisable(GL_SCISSOR_TEST));
     G(glDisable(GL_DEPTH_TEST));
@@ -5128,7 +5184,7 @@ void RunSsao(const CopyDispCmd& c) {
     G(glBlendFunc(GL_ZERO, GL_SRC_COLOR)); // (the picture times the occlusion factor)
     G(glUseProgram(g_ssaoProg.prog));
     G(glActiveTexture(GL_TEXTURE0));
-    G(glBindTexture(GL_TEXTURE_2D, g_efbDepthTex));
+    G(glBindTexture(GL_TEXTURE_2D, depthTex));
     G(glUniform1i(g_ssaoProg.depth, 0));
     const float tw = static_cast<float>(g_rtW), th = static_cast<float>(g_rtH);
     G(glUniform4f(g_ssaoProg.size, tw, th, 1.0f / tw, 1.0f / th));
@@ -5148,7 +5204,7 @@ void RunSsao(const CopyDispCmd& c) {
     G(glEnableVertexAttribArray(AT_POS));
     G(glVertexAttribPointer(AT_POS, 2, GL_FLOAT, GL_FALSE, 0, nullptr));
     G(glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
-    G(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, g_efbDepthTex, 0));
+    if (fromEfb) G(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, g_efbDepthTex, 0));
     G(glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE));
     G(glDepthMask(GL_TRUE));
     G(glDisable(GL_BLEND));

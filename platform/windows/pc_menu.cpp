@@ -45,16 +45,18 @@ public:
     // Round: the BackButton layout (BackButton.arc, the game's round "<" button). Its pill is a left cap, a centre and a right
     // cap: the centre and the text are hidden and the caps (32 wide) meet, a circle with the arrow in the middle.
     void InitRound() {
-        initLayoutManager("BackButton", 1);
-        static const char* const kHidden[] = {"ShaCButton", "PicCFrame", "PicCButton", "PicCShine", "BButtonText"};
+        initLayoutManagerWithTextBoxBufferLength("BackButton", 8, 1);
+        static const char* const kHidden[] = {"ShaCButton", "PicCFrame", "PicCButton", "PicCShine", "PicArrow"};
         for (const char* name : kHidden) MR::hidePaneRecursive(this, name);
         static const char* const kLeft[] = {"ShaLButton", "PicLFrame", "PicLButton", "PicLShine"};
         static const char* const kRight[] = {"ShaRButton", "PicRFrame", "PicRButton", "PicRShine"};
         for (const char* name : kLeft)
-            if (nw4r::lyt::Pane* q = MR::getPane(this, name)) q->mTranslate.x = -16.0f;
+            if (nw4r::lyt::Pane* q = MR::getPane(this, name)) q->mTranslate.x = -15.5f;
         for (const char* name : kRight)
-            if (nw4r::lyt::Pane* q = MR::getPane(this, name)) q->mTranslate.x = 16.0f;
-        if (nw4r::lyt::Pane* q = MR::getPane(this, "PicArrow")) q->mTranslate.x = 0.0f;
+            if (nw4r::lyt::Pane* q = MR::getPane(this, name)) q->mTranslate.x = 15.5f;
+        static const char* const kText[] = {"Txt", "Sha", "TxtJpJa", "ShaJpJa", "TxtUsEn", "ShaUsEn", "TxtEuEn", "ShaEuEn"};
+        for (const char* name : kText)  // (the text sat right of the arrow)
+            if (nw4r::lyt::Pane* q = MR::getPane(this, name)) q->mTranslate.x = name[0] == 'S' ? 1.8f : 0.0f;
         if (nw4r::lyt::Pane* q = MR::getPane(this, "BoxButton")) {
             q->mSize.width = 64.0f;
             q->mSize.height = 64.0f;
@@ -67,9 +69,11 @@ public:
         kill();
     }
     void PlaceRound() {
-        if (nw4r::lyt::Pane* q = MR::getPane(this, "Back")) {  // (its child BackButton sits 95 to the right)
-            q->mTranslate.x = mX - 95.0f * mScale;
-            q->mTranslate.y = mCenter;
+        // The button's centre is (-181, -176) in the layout (Back -276, -176 and its child +95); the animations move Back,
+        // so the whole layout is placed: centre at (mX, mCenter), scaled.
+        if (nw4r::lyt::Pane* q = MR::getPane(this, "RootPane")) {
+            q->mTranslate.x = mX + 181.0f * mScale;
+            q->mTranslate.y = mCenter + 176.0f * mScale;
             q->mScale.x = mScale;
             q->mScale.y = mScale;
         }
@@ -99,15 +103,12 @@ public:
     }
 
     void SetText(const char* text) {
-        if (mRound) {  // ("+": the arrow mirrored, pointing right)
-            if (nw4r::lyt::Pane* q = MR::getPane(this, "PicArrow")) q->mScale.x = text[0] == '+' ? -1.0f : 1.0f;
-            return;
-        }
+        const char* textPane = mRound ? "BButtonText" : "NBackDown";
         wchar_t wide[64];
         int i = 0;
         for (; text[i] && i < 63; ++i) wide[i] = static_cast<wchar_t>(static_cast<unsigned char>(text[i]));
         wide[i] = 0;
-        MR::setTextBoxMessageRecursive(this, "NBackDown", wide);
+        MR::setTextBoxMessageRecursive(this, textPane, wide);
     }
     // scaleX > 0: narrower than tall-scale (the small - / + buttons; the frame is fixed picture pieces, so only scaling shapes it).
     void Place(f32 x, f32 center, f32 scale, f32 scaleX) {

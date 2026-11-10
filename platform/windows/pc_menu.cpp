@@ -47,7 +47,6 @@ public:
         static const char* const kHidden[] = {"BG", "PicStagebase", "PicStagebase1", "Stars", "Counter", "LetterButton", "PositionNull", "NBackUp"};
         for (const char* name : kHidden) MR::hidePaneRecursive(this, name);
         PlaceButtons(this, mCenter + kQuitStep * mScale, mScale, mX);
-        if (nw4r::lyt::Pane* p = MR::getPane(this, "BackButton")) KeepSizes(p);
         MR::connectToSceneLayoutOnPause(this);
         mCtrl = new ButtonPaneController(this, "NBackDown", "BoxButton2", 0, true);
         mCtrl->_22 = false;
@@ -69,16 +68,12 @@ public:
         wide[i] = 0;
         MR::setTextBoxMessageRecursive(this, "NBackDown", wide);
     }
-    // round: every part of the button no wider than it is tall (the frame's ends stay round, as a circle), else its own size.
-    void Place(f32 x, f32 center, f32 scale, bool round) {
+    // scaleX > 0: narrower than tall-scale (the small - / + buttons; the frame is fixed picture pieces, so only scaling shapes it).
+    void Place(f32 x, f32 center, f32 scale, f32 scaleX) {
         mX = x;
         mCenter = center;
         mScale = scale;
-        PlaceButtons(this, mCenter + kQuitStep * mScale, mScale, mX);
-        for (int i = 0; i < mKept; ++i) {
-            mPanes[i]->mSize.width = round && mSizes[i].width > mSizes[i].height ? mSizes[i].height : mSizes[i].width;
-            mPanes[i]->mSize.height = mSizes[i].height;
-        }
+        PlaceButtons(this, mCenter + kQuitStep * mScale, mScale, mX, scaleX);
     }
     void Show() {
         mLeaving = false;
@@ -95,22 +90,6 @@ public:
     ButtonPaneController* mCtrl;
     f32 mCenter, mScale, mX;
     bool mLeaving = false;
-
-private:
-    void KeepSizes(nw4r::lyt::Pane* pane) {
-        for (nw4r::lyt::PaneList::Iterator it = pane->GetChildList().GetBeginIter(); it != pane->GetChildList().GetEndIter(); ++it) {
-            if (mKept < kMaxPanes) {
-                mPanes[mKept] = &*it;
-                mSizes[mKept] = it->mSize;
-                ++mKept;
-            }
-            KeepSizes(&*it);
-        }
-    }
-    static constexpr int kMaxPanes = 32;
-    nw4r::lyt::Pane* mPanes[kMaxPanes];
-    nw4r::lyt::Size mSizes[kMaxPanes];
-    int mKept = 0;
 };
 
 // ---- pages
@@ -133,7 +112,7 @@ enum Id {
 struct Item {
     int id;
     f32 x, y, scale;
-    bool round = false;  // (the - / + buttons: a circle)
+    f32 scaleX = 0.0f;  // (0: the same as scale; the small - / + buttons are narrower)
 };
 constexpr f32 kL = -150.0f, kR = 150.0f, kS = 0.55f;
 const Item kMainItems[] = {{kGoGraphics, kL, 54, kS}, {kGoAudio, kL, 2, kS}, {kGoControls, kR, 54, kS}, {kGoGame, kR, 2, kS},
@@ -143,9 +122,8 @@ constexpr f32 kG = 0.5f, kGx = 195.0f;
 const Item kGraphicsItems[] = {{kRes, -kGx, 40, kG},  {kFsr, 0, 40, kG},       {kFxaa, kGx, 40, kG},
                                {kMsaa, -kGx, -20, kG}, {kFps, 0, -20, kG},      {kVsync, kGx, -20, kG},
                                {kFull, -kGx, -80, kG}, {kFpsLimit, 0, -80, kG}, {kToMain, kGx, -80, kG}};
-// Audio: each value with a round - / + button against its left and right end (the value is 140 wide at 55 %).
-constexpr f32 kRound = 0.5f, kSide = 86.0f;
-constexpr bool kRoundX = true;
+// Audio: each value with a small - / + button against its left and right end (the value is 140 wide at 55 %).
+constexpr f32 kRound = 0.42f, kRoundX = 0.15f, kSide = 92.0f;
 const Item kAudioItems[] = {{kVolMaster, 0, 54, kS}, {kVolMasterDown, -kSide, 54, kRound, kRoundX}, {kVolMasterUp, kSide, 54, kRound, kRoundX},
                             {kVolMusic, 0, 2, kS},   {kVolMusicDown, -kSide, 2, kRound, kRoundX},   {kVolMusicUp, kSide, 2, kRound, kRoundX},
                             {kVolSfx, 0, -50, kS},   {kVolSfxDown, -kSide, -50, kRound, kRoundX},   {kVolSfxUp, kSide, -50, kRound, kRoundX},
@@ -281,7 +259,7 @@ void ShowPage(Page p) {
     sPage = p;
     const PageItems page = ItemsOf(p);
     for (int i = 0; i < kPool; ++i) sNote[i][0] = 0;
-    for (int i = 0; i < page.count; ++i) sPool[i]->Place(page.items[i].x, page.items[i].y, page.items[i].scale, page.items[i].round);
+    for (int i = 0; i < page.count; ++i) sPool[i]->Place(page.items[i].x, page.items[i].y, page.items[i].scale, page.items[i].scaleX);
     Texts();
     for (int i = 0; i < page.count; ++i) sPool[i]->Show();
 }

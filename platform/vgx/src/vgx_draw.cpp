@@ -2418,8 +2418,9 @@ bool CharaAAPlayerOnly() {
 //                         as before (a menu over the picture: filtering, then covering most of it again, would cost for nothing)
 // Back-end switches (vgx_backend_gl.cpp, EdgeParams): GXV_EDGE_AA_THRESHOLD, GXV_EDGE_AA_MIN, GXV_EDGE_AA_SHARPNESS.
 extern "C" {
-int port_vgx_ssao = 0; // (the PC Settings' SSAO switch: platform/windows/pc_settings.cpp)
+int port_vgx_ssao = 0; // (the PC Settings' SSAO switch: platform/windows/pc_settings.cpp; 2: the occlusion shown alone)
 }
+extern "C" int port_vgx_ssao_view(void) { return port_vgx_ssao == 2; }
 int EdgeAAMode() {
     const int m = static_cast<int>(VGX_KNOB(static_cast<int>(std::clamp<long>(EnvInt("GXV_EDGE_AA", 0), 0, 3))));
     return m;

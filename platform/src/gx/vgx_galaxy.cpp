@@ -1006,9 +1006,10 @@ void RegisterMemory() {
 // the game calls them: a write of BP register 0xFF, which the console's GPU does not have (vgx_state.cpp WriteBP). Only the
 // HUD's markers, and only with GXV_CHARAA or GXV_EDGE_AA on (vgx_draw.cpp, character / whole-picture edge smoothing: the HUD is never
 // smoothed); otherwise nothing is written and the stream is the game's own, byte for byte. Game thread (the GX library's FIFO writer).
+extern "C" int port_vgx_ssao; // (vgx_draw.cpp: the PC Settings' SSAO switch)
 extern "C" void port_vgx_marker(uint32_t kind) {
     const bool wanted = PORT_HOT_KNOB(bool, vgx::CharaAAMode() != 0 || vgx::EdgeAAMode() != 0);  // (GXV_HOT_KNOBS: read without a barrier, port/hot_knob.h)
-    if ((kind != 1u && kind != 2u) || !wanted) return; // (PORT_GX_MARK_HUD_BEGIN, _END)
+    if ((kind != 1u && kind != 2u) || (!wanted && !port_vgx_ssao)) return; // (PORT_GX_MARK_HUD_BEGIN, _END; also for SSAO: the HUD is left alone)
     __PortGXFifo_u8(0x61);
     __PortGXFifo_u32((0xFFu << 24) | kind);
 }

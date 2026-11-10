@@ -5031,6 +5031,7 @@ void CapturePresented(const CopyDispCmd& c, int x, int y, int w, int h) {
 // perspective with a far plane well beyond the near one: z ~ near / (1 - d). The sky (depth 1) and the HUD's rectangles are left
 // alone. Needs the depth as a texture (OES_depth_texture); with multisampling the depth is resolved with the colour (EfbForRead).
 extern "C" void port_log(const char* fmt, ...);  // (the game's log; declared above only for some builds)
+extern "C" int port_vgx_ssao_view(void); // (vgx_draw.cpp: ssao=2, the occlusion shown alone)
 struct SsaoProg {
     GLuint prog = 0;
     bool failed = false;
@@ -5179,9 +5180,13 @@ void RunSsao(const CopyDispCmd& c) {
     G(glDisable(GL_CULL_FACE));
     G(glDepthMask(GL_FALSE));
     G(glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE));
-    G(glEnable(GL_BLEND));
-    G(glBlendEquation(GL_FUNC_ADD));
-    G(glBlendFunc(GL_ZERO, GL_SRC_COLOR)); // (the picture times the occlusion factor)
+    if (port_vgx_ssao_view()) {
+        G(glDisable(GL_BLEND)); // (ssao=2 in settings-pc.ini: the occlusion factor shown alone, for tuning)
+    } else {
+        G(glEnable(GL_BLEND));
+        G(glBlendEquation(GL_FUNC_ADD));
+        G(glBlendFunc(GL_ZERO, GL_SRC_COLOR)); // (the picture times the occlusion factor)
+    }
     G(glUseProgram(g_ssaoProg.prog));
     G(glActiveTexture(GL_TEXTURE0));
     G(glBindTexture(GL_TEXTURE_2D, depthTex));

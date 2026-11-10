@@ -1,5 +1,7 @@
 #include "Game/LiveActor/DisplayListMaker.hpp"
 #include "port/offset32.h"
+#include "port/port.h"
+#include <stdio.h>
 #include "Game/LiveActor/ModelManager.hpp"
 #include "Game/MapObj/CollectCounter.hpp"
 #include "Game/MapObj/IceStep.hpp"
@@ -38,7 +40,7 @@
 #include <revolution/gd/GDBase.h>
 
 #if defined(TARGET_PC) && defined(_WIN32)
-extern "C" int port_pc_skin_own_face(void);  // platform/windows/pc_settings.cpp: skin.ini face=model
+extern "C" int port_pc_skin_own_face(void);
 #endif
 
 namespace MR {
@@ -674,6 +676,26 @@ void MarioActor::updateFace() {
 #if defined(TARGET_PC) && defined(_WIN32)
     if (port_pc_skin_own_face()) {  // (skin.ini face=model: the game's face model is never drawn)
         MR::hideModel(_A5C);
+        {  // (diagnostics: the head joints' places and whether their parts are hidden, every 2 seconds for 20 seconds)
+            static int frames = 0;
+            if (frames <= 1200 && frames++ % 120 == 0) {
+                static const char* const kJoints[] = {"Spine2", "Head", "Cap0", "Eye0", "Face0", "HandL"};
+                for (const char* name : kJoints) {
+                    J3DJoint* j = MR::getJoint(mModels[0], name);
+                    if (!j) {
+                        port_log("skin diag: %s missing", name);
+                        continue;
+                    }
+                    MtxPtr m = MR::getJointMtx(mModels[0], name);
+                    char parts[96] = "";
+                    int n = 0;
+                    for (J3DMaterial* mat = j->mMesh; mat && n < 80; mat = mat->mNext)
+                        n += snprintf(parts + n, sizeof parts - n, " shape%s", (mat->mShape->mFlags & 1) ? "(hidden)" : "");
+                    port_log("skin diag: %s at %.0f %.0f %.0f, scale %.2f, parts:%s", name, m[0][3], m[1][3], m[2][3], m[0][0] * m[0][0] + m[1][0] * m[1][0] + m[2][0] * m[2][0], parts);
+                }
+                port_log("skin diag: model hidden %d, mCurrModel %d", MR::isHiddenModel(this) ? 1 : 0, (int)mCurrModel);
+            }
+        }
         return;
     }
 #endif

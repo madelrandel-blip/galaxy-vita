@@ -147,6 +147,10 @@ void MarioActor::setPlayerMode(u16 playerMode, bool myBool) {
 
         changeHandMaterial();
 
+#if defined(TARGET_PC)
+        if (_9C8 != nullptr && _A50 != nullptr && _A54 != nullptr)  // (the models exist only if the stage loaded them)
+#endif
+        {
         MR::stopBrk(_9C8);
         MR::stopBrk(_A50);
         MR::stopBrk(_A54);
@@ -154,6 +158,7 @@ void MarioActor::setPlayerMode(u16 playerMode, bool myBool) {
         MR::startBrk(_9C8, "InvincibleMario");
         MR::startBrk(_A50, "InvincibleMarioHandL");
         MR::startBrk(_A54, "InvincibleMarioHandR");
+        }
 
         MR::removeAllClingingKarikari();
         break;

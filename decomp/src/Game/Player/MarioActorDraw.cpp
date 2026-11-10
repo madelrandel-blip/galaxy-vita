@@ -287,6 +287,13 @@ void MarioActor::initInvincibleMario() {
         archiveName = "InvincibleMario.arc";
     }
 
+#if defined(TARGET_PC)
+    // (a skin can look like Luigi while the stage's archive list follows the save's player: use what was loaded)
+    if (gIsLuigi && !MR::isLoadedObjectOrLayoutArchive(modelName) && MR::isLoadedObjectOrLayoutArchive("InvincibleMario")) {
+        modelName = "InvincibleMario";
+        archiveName = "InvincibleMario.arc";
+    }
+#endif
     if (!MR::isLoadedObjectOrLayoutArchive(modelName)) {
         return;
     }

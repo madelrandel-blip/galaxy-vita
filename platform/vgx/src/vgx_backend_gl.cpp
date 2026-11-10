@@ -5030,6 +5030,7 @@ void CapturePresented(const CopyDispCmd& c, int x, int y, int w, int h) {
 // occludes it (nearer still: another object in front, no darkening: no halos). Distance from the stored depth as for any
 // perspective with a far plane well beyond the near one: z ~ near / (1 - d). The sky (depth 1) and the HUD's rectangles are left
 // alone. Needs the depth as a texture (OES_depth_texture); with multisampling the depth is resolved with the colour (EfbForRead).
+extern "C" void port_log(const char* fmt, ...);  // (the game's log; declared above only for some builds)
 struct SsaoProg {
     GLuint prog = 0;
     bool failed = false;

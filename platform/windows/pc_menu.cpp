@@ -39,10 +39,47 @@ void PlaceButtons(LayoutActor* actor, f32 backButtonY, f32 scale, f32 x = 0.0f, 
 // One button: the PauseMenu layout again, showing only its Quit button, centred at (x, center).
 class PortMenuButton : public LayoutActor {
 public:
-    PortMenuButton(f32 center, f32 scale, f32 x = 0.0f)
-        : LayoutActor("PortMenuButton", true), mCtrl(nullptr), mCenter(center), mScale(scale), mX(x) {}
+    PortMenuButton(f32 center, f32 scale, f32 x = 0.0f, bool round = false)
+        : LayoutActor("PortMenuButton", true), mCtrl(nullptr), mCenter(center), mScale(scale), mX(x), mRound(round) {}
+
+    // Round: the BackButton layout (BackButton.arc, the game's round "<" button). Its pill is a left cap, a centre and a right
+    // cap: the centre and the text are hidden and the caps (32 wide) meet, a circle with the arrow in the middle.
+    void InitRound() {
+        initLayoutManager("BackButton", 1);
+        static const char* const kHidden[] = {"ShaCButton", "PicCFrame", "PicCButton", "PicCShine", "BButtonText"};
+        for (const char* name : kHidden) MR::hidePaneRecursive(this, name);
+        static const char* const kLeft[] = {"ShaLButton", "PicLFrame", "PicLButton", "PicLShine"};
+        static const char* const kRight[] = {"ShaRButton", "PicRFrame", "PicRButton", "PicRShine"};
+        for (const char* name : kLeft)
+            if (nw4r::lyt::Pane* q = MR::getPane(this, name)) q->mTranslate.x = -16.0f;
+        for (const char* name : kRight)
+            if (nw4r::lyt::Pane* q = MR::getPane(this, name)) q->mTranslate.x = 16.0f;
+        if (nw4r::lyt::Pane* q = MR::getPane(this, "PicArrow")) q->mTranslate.x = 0.0f;
+        if (nw4r::lyt::Pane* q = MR::getPane(this, "BoxButton")) {
+            q->mSize.width = 64.0f;
+            q->mSize.height = 64.0f;
+        }
+        PlaceRound();
+        MR::createAndAddPaneCtrl(this, "Back", 1);
+        MR::connectToSceneLayoutOnPause(this);
+        mCtrl = new ButtonPaneController(this, "Back", "BoxButton", 0, true);
+        mCtrl->_22 = false;
+        kill();
+    }
+    void PlaceRound() {
+        if (nw4r::lyt::Pane* q = MR::getPane(this, "Back")) {  // (its child BackButton sits 95 to the right)
+            q->mTranslate.x = mX - 95.0f * mScale;
+            q->mTranslate.y = mCenter;
+            q->mScale.x = mScale;
+            q->mScale.y = mScale;
+        }
+    }
 
     virtual void init(const JMapInfoIter&) {
+        if (mRound) {
+            InitRound();
+            return;
+        }
         initLayoutManagerWithTextBoxBufferLength("PauseMenu", 64, 1);  // (text box buffers of 64 characters, 1 animation layer)
         static const char* const kHidden[] = {"BG", "PicStagebase", "PicStagebase1", "Stars", "Counter", "LetterButton", "PositionNull", "NBackUp"};
         for (const char* name : kHidden) MR::hidePaneRecursive(this, name);
@@ -62,6 +99,10 @@ public:
     }
 
     void SetText(const char* text) {
+        if (mRound) {  // ("+": the arrow mirrored, pointing right)
+            if (nw4r::lyt::Pane* q = MR::getPane(this, "PicArrow")) q->mScale.x = text[0] == '+' ? -1.0f : 1.0f;
+            return;
+        }
         wchar_t wide[64];
         int i = 0;
         for (; text[i] && i < 63; ++i) wide[i] = static_cast<wchar_t>(static_cast<unsigned char>(text[i]));
@@ -73,6 +114,10 @@ public:
         mX = x;
         mCenter = center;
         mScale = scale;
+        if (mRound) {
+            PlaceRound();
+            return;
+        }
         PlaceButtons(this, mCenter + kQuitStep * mScale, mScale, mX, scaleX);
     }
     void Show() {
@@ -89,6 +134,7 @@ public:
 
     ButtonPaneController* mCtrl;
     f32 mCenter, mScale, mX;
+    bool mRound;
     bool mLeaving = false;
 };
 
@@ -123,7 +169,7 @@ const Item kGraphicsItems[] = {{kRes, -kGx, 40, kG},  {kFsr, 0, 40, kG},       {
                                {kMsaa, -kGx, -20, kG}, {kFps, 0, -20, kG},      {kVsync, kGx, -20, kG},
                                {kFull, -kGx, -80, kG}, {kFpsLimit, 0, -80, kG}, {kToMain, kGx, -80, kG}};
 // Audio: each value with a small - / + button against its left and right end (the value is 140 wide at 55 %).
-constexpr f32 kRound = 0.42f, kRoundX = 0.15f, kSide = 92.0f;
+constexpr f32 kRound = 0.6f, kRoundX = 1.0f, kSide = 100.0f;  // (kRoundX > 0: a round button)
 const Item kAudioItems[] = {{kVolMaster, 0, 54, kS}, {kVolMasterDown, -kSide, 54, kRound, kRoundX}, {kVolMasterUp, kSide, 54, kRound, kRoundX},
                             {kVolMusic, 0, 2, kS},   {kVolMusicDown, -kSide, 2, kRound, kRoundX},   {kVolMusicUp, kSide, 2, kRound, kRoundX},
                             {kVolSfx, 0, -50, kS},   {kVolSfxDown, -kSide, -50, kRound, kRoundX},   {kVolSfxUp, kSide, -50, kRound, kRoundX},
@@ -160,6 +206,9 @@ PageItems ItemsOf(Page p) {
 constexpr int kPool = 10;
 PortMenuButton* sSettings = nullptr;
 PortMenuButton* sPool[kPool] = {};
+constexpr int kRoundPool = 6;
+PortMenuButton* sRoundPool[kRoundPool] = {};
+PortMenuButton* sSlot[kPool] = {};  // the page's item i -> its button (set by ShowPage)
 Page sPage = Page::Main;
 enum class Screen { Opening, Editing, Applying, Capturing, Switching, Closing };
 Screen sScreen = Screen::Opening;
@@ -251,7 +300,7 @@ void Texts() {
     for (int i = 0; i < page.count; ++i) {
         if (sNote[i][0]) snprintf(text, sizeof text, "%s", sNote[i]);
         else TextOf(page.items[i].id, text, sizeof text);
-        sPool[i]->SetText(text);
+        sSlot[i]->SetText(text);
     }
 }
 
@@ -259,16 +308,24 @@ void ShowPage(Page p) {
     sPage = p;
     const PageItems page = ItemsOf(p);
     for (int i = 0; i < kPool; ++i) sNote[i][0] = 0;
-    for (int i = 0; i < page.count; ++i) sPool[i]->Place(page.items[i].x, page.items[i].y, page.items[i].scale, page.items[i].scaleX);
+    int pill = 0, round = 0;
+    for (int i = 0; i < page.count; ++i) {
+        sSlot[i] = page.items[i].scaleX > 0.0f ? sRoundPool[round++] : sPool[pill++];
+        sSlot[i]->Place(page.items[i].x, page.items[i].y, page.items[i].scale, page.items[i].scaleX);
+    }
     Texts();
-    for (int i = 0; i < page.count; ++i) sPool[i]->Show();
+    for (int i = 0; i < page.count; ++i) sSlot[i]->Show();
 }
 void HideAll() {
     for (PortMenuButton* b : sPool)
         if (b) b->Hide();
+    for (PortMenuButton* b : sRoundPool)
+        if (b) b->Hide();
 }
 bool AllGone() {
     for (PortMenuButton* b : sPool)
+        if (b && !b->Gone()) return false;
+    for (PortMenuButton* b : sRoundPool)
         if (b && !b->Gone()) return false;
     return true;
 }
@@ -356,6 +413,10 @@ void port_pc_menu_init(LayoutActor* pauseMenu) {
         sPool[i] = new PortMenuButton(0.0f, kS);
         sPool[i]->initWithoutIter();
     }
+    for (int i = 0; i < kRoundPool; ++i) {
+        sRoundPool[i] = new PortMenuButton(0.0f, kRound, 0.0f, true);
+        sRoundPool[i]->initWithoutIter();
+    }
 }
 
 void port_pc_menu_appear() {
@@ -393,10 +454,10 @@ bool port_pc_menu_settings_step(bool first) {
         return false;
     case Screen::Editing:
         for (int i = 0; i < page.count; ++i) {
-            if (sPool[i]->mCtrl->isPointingTrigger()) MR::startSystemSE("SE_SY_SELECT_PAUSE_ITEM", -1, -1);
+            if (sSlot[i]->mCtrl->isPointingTrigger()) MR::startSystemSE("SE_SY_SELECT_PAUSE_ITEM", -1, -1);
         }
         for (int i = 0; i < page.count; ++i) {
-            if (sPool[i]->mCtrl->trySelect()) {
+            if (sSlot[i]->mCtrl->trySelect()) {
                 sChosen = i;
                 sScreen = Screen::Applying;
                 return false;
@@ -414,7 +475,7 @@ bool port_pc_menu_settings_step(bool first) {
         }
         return false;
     case Screen::Applying: {
-        ButtonPaneController* c = sPool[sChosen]->mCtrl;
+        ButtonPaneController* c = sSlot[sChosen]->mCtrl;
         const int id = page.items[sChosen].id;
         const bool back = id == kClose || id == kToMain;
         if (c->isTimingForSelectedSe()) MR::startSystemSE(back ? "SE_SY_PAUSE_OFF" : "SE_SY_FILE_SEL_UPPER_DECIDE", -1, -1);
@@ -443,7 +504,7 @@ bool port_pc_menu_settings_step(bool first) {
         if (port_pc_capture_poll() == 0) return false;
         MR::startSystemSE("SE_SY_FILE_SEL_UPPER_DECIDE", -1, -1);
         Texts();
-        sPool[sChosen]->mCtrl->forceToWait();
+        sSlot[sChosen]->mCtrl->forceToWait();
         sScreen = Screen::Editing;
         return false;
     case Screen::Switching:
@@ -473,5 +534,7 @@ void port_pc_menu_kill() {
     if (port_pc_capture_active() >= 0) port_pc_capture_feed(-1, -1, 1);
     if (sSettings && !MR::isDead(sSettings)) sSettings->kill();
     for (PortMenuButton* b : sPool)
+        if (b && !MR::isDead(b)) b->kill();
+    for (PortMenuButton* b : sRoundPool)
         if (b && !MR::isDead(b)) b->kill();
 }

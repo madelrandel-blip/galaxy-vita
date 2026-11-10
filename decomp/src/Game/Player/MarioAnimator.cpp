@@ -56,6 +56,12 @@ void MarioAnimator_FORCE_MATCH_SDATA2() {
     (void)-0.5f;
 }
 
+#if defined(TARGET_PC) && defined(_WIN32)
+extern XanimeCore* gPortPlayerCores[2];  // (XanimeCore.cpp)
+extern f32 gPortPlayerTransScale;
+extern "C" float port_pc_skin_anim_scale(void);  // platform/windows/pc_settings.cpp
+#endif
+
 void MarioAnimator::init() {
     XanimeSwapTable* luigiAnimations = nullptr;
     if (gIsLuigi) {
@@ -108,6 +114,13 @@ void MarioAnimator::init() {
     changeDefaultUpper("\x8a\xee\x96\x7b");
     mXanimePlayerUpper->changeAnimation("\x8a\xee\x96\x7b");
     mXanimePlayerUpper->mCore->shareJointTransform(mXanimePlayer->mCore);
+#if defined(TARGET_PC) && defined(_WIN32)
+    {
+        gPortPlayerCores[0] = mXanimePlayer->mCore;
+        gPortPlayerCores[1] = mXanimePlayerUpper->mCore;
+        gPortPlayerTransScale = port_pc_skin_anim_scale();  // (skin.ini anim_scale: a skin made at another size)
+    }
+#endif
     PSMTXCopy(MR::tmpMtxRotYRad(PI), _DC.toMtxPtr());
 }
 

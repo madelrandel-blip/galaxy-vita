@@ -529,6 +529,26 @@ extern "C" const char* port_pc_skin_files(void) {
 }
 // skins/<name>/skin.ini: look=luigi uses Luigi's own models, animations, face, power-up suits and voice; look=mario Mario's.
 // The skin the game started with (a change applies at the next start).
+// skins/<name>/skin.ini anim_scale=<factor> (0.25..4; default 1): the player's animations move the joints this much farther
+// apart, for a model made at another size than Mario (the animations carry Mario's bone lengths).
+extern "C" float port_pc_skin_anim_scale(void) {
+    static float scale = [] {
+        float v = 1.0f;
+        if (!sSkinStart[0]) return v;
+        if (FILE* f = _wfopen(Wide(SkinsDir() + "/" + sSkinStart + "/skin.ini").c_str(), L"r")) {
+            char line[128];
+            while (fgets(line, sizeof line, f)) {
+                float x;
+                if (sscanf(line, "anim_scale=%f", &x) == 1 && x >= 0.25f && x <= 4.0f) v = x;
+            }
+            fclose(f);
+        }
+        if (v != 1.0f) port_log("skin: %s, animation scale %.2f", sSkinStart, v);
+        return v;
+    }();
+    return scale;
+}
+
 extern "C" int port_pc_skin_look(void) {
     static int look = [] {
         if (!sSkinStart[0]) return -1;

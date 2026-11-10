@@ -687,6 +687,17 @@ void XanimeCore::calcScaleBlendBasic(const TVec3f& rScale, const TVec3f& rTransl
     PSMTXCopy(J3DSys::mCurrentMtx, pMtx);
 }
 
+#ifdef TARGET_PC
+// (set by MarioAnimator for the player's two animation players; 1: as the animations have them)
+XanimeCore* gPortPlayerCores[2];
+f32 gPortPlayerTransScale = 1.0f;
+static inline void portScalePlayerTranslate(const XanimeCore* pCore, TVec3f& rTranslate) {
+    if (gPortPlayerTransScale != 1.0f && (pCore == gPortPlayerCores[0] || pCore == gPortPlayerCores[1])) {
+        rTranslate *= gPortPlayerTransScale;
+    }
+}
+#endif
+
 void XanimeCore::calcScaleBlendSpecial() {
     u16 joint = getJoint()->getJntNo();
     MtxPtr pMtx = getMtxBuffer()->getAnmMtx(joint);
@@ -694,6 +705,9 @@ void XanimeCore::calcScaleBlendSpecial() {
     TVec3f translate;
     scale = mJointList[joint]._28._0;
     translate = mJointList[joint]._28._C;
+#ifdef TARGET_PC
+    portScalePlayerTranslate(this, translate);
+#endif
     PSMTXQuat(pMtx, &mJointList[joint]._28.mRotation);
     calcScaleBlendMaya(scale, translate);
 }
@@ -785,6 +799,9 @@ void XanimeCore::calc() {
     if (_6 == 3) {
         fixT(&translate);
     }
+#ifdef TARGET_PC
+    portScalePlayerTranslate(this, translate);
+#endif
 
     switch (_4) {
     case 1:
